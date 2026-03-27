@@ -1,107 +1,77 @@
 import base64
 import json
 import re
+import sqlite3
+from pathlib import Path
 
-import gspread
 from groq import Groq
 
 from .config import get_settings
-from .models import PlayerStanding, StandingsResponse
 
-_SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
+DB_PATH = Path(__file__).parent / "scores.db"
+
+
+def _conn() -> sqlite3.Connection:
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def _init_db() -> None:
+    with _conn() as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS matches (
+                id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS scores (
+                player_name TEXT    NOT NULL,
+                match_id    INTEGER NOT NULL REFERENCES matches(id),
+                points      INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (player_name, match_id)
+            )
+        """)
 
 
 class ScoreKeeperService:
     def __init__(self):
-        s = get_settings()
-        self.groq = Groq(api_key=s.groq_api_key)
-
-        creds_dict = json.loads(s.google_service_account_json)
-        gc = gspread.service_account_from_dict(creds_dict, scopes=_SCOPES)
-        self.sheet = gc.open_by_key(s.google_sheet_id).sheet1
-        self._ensure_header()
-
-    # ------------------------------------------------------------------ #
-
-    def _ensure_header(self) -> None:
-        row1 = self.sheet.row_values(1)
-        if not row1:
-            self.sheet.update("A1", [["Player"]])
-
-    @staticmethod
-    def _col_letter(n: int) -> str:
-        result = ""
-        while n:
-            n, rem = divmod(n - 1, 26)
-            result = chr(65 + rem) + result
-        return result
-
-    def _get_all_data(self) -> tuple[list[str], dict[str, dict[str, int]]]:
-        """Returns (match_headers, {player_name: {match_name: points}})."""
-        all_values = self.sheet.get_all_values()
-        if not all_values:
-            return [], {}
-
-        headers = all_values[0]
-        match_headers = headers[1:]  # skip 'Player' column
-
-        players: dict[str, dict[str, int]] = {}
-        for row in all_values[1:]:
-            if not row or not row[0].strip():
-                continue
-            name = row[0].strip()
-            scores: dict[str, int] = {}
-            for i, match in enumerate(match_headers):
-                raw = row[i + 1] if i + 1 < len(row) else ""
-                scores[match] = int(raw) if str(raw).strip().lstrip("-").isdigit() else 0
-            players[name] = scores
-
-        return match_headers, players
+        self.groq = Groq(api_key=get_settings().groq_api_key)
+        _init_db()
 
     # ------------------------------------------------------------------ #
 
     def parse_image(self, image_bytes: bytes, content_type: str) -> dict[str, int]:
-        """Use Groq Llama-4 vision to extract {player: points} from image."""
         b64 = base64.b64encode(image_bytes).decode()
-
         completion = self.groq.chat.completions.create(
             model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{content_type};base64,{b64}"
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                "Extract every player name and their numeric score/points "
-                                "from this image.\n"
-                                "Return ONLY valid JSON — no markdown, no explanation:\n"
-                                '{"players": [{"name": "...", "points": 42}, ...]}\n'
-                                "If names are in Hindi or other scripts, keep them as-is."
-                            ),
-                        },
-                    ],
-                }
-            ],
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{content_type};base64,{b64}"},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Extract every player name and their numeric score/points "
+                            "from this image.\n"
+                            "Return ONLY valid JSON — no markdown, no explanation:\n"
+                            '{"players": [{"name": "...", "points": 42}, ...]}\n'
+                            "Keep names exactly as shown (Hindi or any script is fine)."
+                        ),
+                    },
+                ],
+            }],
             max_tokens=1024,
         )
-
-        content = completion.choices[0].message.content or ""
-        # Strip markdown code fences if present
-        content = re.sub(r"```(?:json)?", "", content).strip()
+        raw = re.sub(r"```(?:json)?", "", completion.choices[0].message.content or "").strip()
         try:
-            result = json.loads(content)
+            result = json.loads(raw)
         except Exception:
-            m = re.search(r"\{.*\}", content, re.DOTALL)
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
             result = json.loads(m.group()) if m else {}
 
         return {
@@ -111,86 +81,80 @@ class ScoreKeeperService:
         }
 
     def add_match(self, player_scores: dict[str, int]) -> tuple[str, int]:
-        """Append a new match column. Returns (match_name, match_number)."""
-        all_values = self.sheet.get_all_values() or [["Player"]]
-        headers = all_values[0]
-
-        match_number = len(headers)  # len-1 existing matches + 1 new
-        match_name = f"Match {match_number}"
-        new_col = len(headers) + 1
-        col_letter = self._col_letter(new_col)
-
-        # Write header for new match column
-        self.sheet.update(f"{col_letter}1", [[match_name]])
-
-        # Map existing player names (lowercase) → row index (1-based)
-        player_rows: dict[str, int] = {}
-        for i, row in enumerate(all_values[1:], start=2):
-            if row and row[0].strip():
-                player_rows[row[0].strip().lower()] = i
-
-        next_row = len(all_values) + 1
-        for name, points in player_scores.items():
-            name_lower = name.lower()
-            row_idx: int | None = None
-
-            # Exact match first, then partial
-            for existing, r in player_rows.items():
-                if existing == name_lower or existing in name_lower or name_lower in existing:
-                    row_idx = r
-                    break
-
-            if row_idx is None:
-                # New player — add row
-                self.sheet.update(f"A{next_row}", [[name]])
-                row_idx = next_row
-                player_rows[name_lower] = next_row
-                next_row += 1
-
-            self.sheet.update(f"{col_letter}{row_idx}", [[points]])
-
+        with _conn() as con:
+            count = con.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
+            match_number = count + 1
+            match_name = f"Match {match_number}"
+            cur = con.execute("INSERT INTO matches (name) VALUES (?)", (match_name,))
+            match_id = cur.lastrowid
+            for name, points in player_scores.items():
+                con.execute(
+                    "INSERT INTO scores (player_name, match_id, points) VALUES (?,?,?)"
+                    " ON CONFLICT(player_name, match_id) DO UPDATE SET points=excluded.points",
+                    (name, match_id, points),
+                )
         return match_name, match_number
 
-    def get_standings(self) -> StandingsResponse:
-        match_headers, players_data = self._get_all_data()
+    def get_standings(self) -> dict:
+        with _conn() as con:
+            matches = [dict(r) for r in con.execute("SELECT id, name FROM matches ORDER BY id")]
+            rows = con.execute("SELECT player_name, match_id, points FROM scores").fetchall()
 
-        standings = sorted(
-            [
-                {"name": n, "total": sum(s.values()), "matches": s}
-                for n, s in players_data.items()
-            ],
-            key=lambda x: x["total"],
-            reverse=True,
-        )
+        players: dict[str, dict[int, int]] = {}
+        for row in rows:
+            players.setdefault(row["player_name"], {})[row["match_id"]] = row["points"]
 
-        return StandingsResponse(
-            players=[
-                PlayerStanding(rank=i + 1, **s)
-                for i, s in enumerate(standings)
-            ],
-            match_headers=match_headers,
-        )
+        standings = []
+        for name, score_map in players.items():
+            total = sum(score_map.values())
+            match_points = {m["name"]: score_map.get(m["id"], 0) for m in matches}
+            standings.append({"name": name, "total": total, "matches": match_points})
+
+        standings.sort(key=lambda x: x["total"], reverse=True)
+        for i, s in enumerate(standings):
+            s["rank"] = i + 1
+
+        return {"players": standings, "match_headers": [m["name"] for m in matches]}
+
+    def export_xlsx(self) -> bytes:
+        import io
+        import openpyxl
+        from openpyxl.styles import Alignment, Font, PatternFill
+
+        data = self.get_standings()
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Scores"
+
+        headers = ["Rank", "Player"] + data["match_headers"] + ["Total"]
+        hfill = PatternFill("solid", fgColor="1e293b")
+        hfont = Font(bold=True, color="FFFFFF")
+        for col, h in enumerate(headers, 1):
+            c = ws.cell(row=1, column=col, value=h)
+            c.fill = hfill
+            c.font = hfont
+            c.alignment = Alignment(horizontal="center")
+
+        for ri, p in enumerate(data["players"], 2):
+            ws.cell(row=ri, column=1, value=p["rank"])
+            ws.cell(row=ri, column=2, value=p["name"])
+            for ci, mh in enumerate(data["match_headers"]):
+                ws.cell(row=ri, column=3 + ci, value=p["matches"].get(mh, 0))
+            ws.cell(row=ri, column=len(headers), value=p["total"])
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
 
     def chat(self, question: str) -> str:
-        match_headers, players_data = self._get_all_data()
+        data = self.get_standings()
+        if not data["players"]:
+            return "अभी तक कोई match data नहीं है। / No match data yet. Please upload a match image first."
 
-        if not players_data:
-            if any(kw in question.lower() for kw in ["point", "score", "match", "player"]):
-                return "अभी तक कोई match data नहीं है। पहले एक image upload करें। / No match data yet. Please upload a match image first."
-            return "I don't have any data yet. Please upload a match image first."
-
-        # Build context table
-        sorted_players = sorted(
-            players_data.items(),
-            key=lambda x: sum(x[1].values()),
-            reverse=True,
-        )
         lines = ["=== Match Points Data ==="]
-        for rank, (name, scores) in enumerate(sorted_players, 1):
-            total = sum(scores.values())
-            details = " | ".join(f"{m}: {p}" for m, p in scores.items())
-            lines.append(f"Rank {rank}: {name} — Total: {total} pts | {details}")
-        context = "\n".join(lines)
+        for p in data["players"]:
+            details = " | ".join(f"{m}: {v}" for m, v in p["matches"].items())
+            lines.append(f"Rank {p['rank']}: {p['name']} — Total: {p['total']} | {details}")
 
         completion = self.groq.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -200,17 +164,15 @@ class ScoreKeeperService:
                     "content": (
                         "You are a helpful points/score assistant for a game leaderboard. "
                         "Answer questions about player scores and match standings. "
-                        "The user may ask in Hindi or English — always respond in the SAME language they used. "
-                        "Be concise and friendly. Use the data below to answer accurately.\n\n"
-                        + context
+                        "The user may ask in Hindi or English — always respond in the SAME language. "
+                        "Be concise and friendly.\n\n" + "\n".join(lines)
                     ),
                 },
                 {"role": "user", "content": question},
             ],
             max_tokens=512,
         )
-
-        return completion.choices[0].message.content or "Sorry, I couldn't generate a response."
+        return completion.choices[0].message.content or "Sorry, could not generate a response."
 
 
 _service: ScoreKeeperService | None = None

@@ -27,3 +27,5 @@ export const sendChat = (question: string): Promise<ChatResponse> =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ question }),
   });
+
+export const exportXlsx = (): string => `${BASE}/export`;

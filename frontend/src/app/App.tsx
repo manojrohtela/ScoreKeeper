@@ -3,10 +3,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Trophy, Upload, MessageSquare, RefreshCw,
   CheckCircle2, AlertCircle, ImagePlus, Send,
-  Medal, Crown, ChevronUp, ChevronDown, Loader2,
+  Medal, Crown, ChevronUp, ChevronDown, Loader2, FileDown,
 } from 'lucide-react';
-import { getStandings, uploadMatch, sendChat } from './lib/api';
-import type { ChatMessage, PlayerStanding, StandingsResponse, UploadResponse } from './lib/types';
+import { getStandings, uploadMatch, sendChat, exportXlsx } from './lib/api';
+import type { ChatMessage, StandingsResponse, UploadResponse } from './lib/types';
 
 // ─── Medal colours ───────────────────────────────────────────────────────────
 function rankBadge(rank: number) {
@@ -36,6 +36,13 @@ function Leaderboard({ data, onRefresh, loading }: {
           Standings
         </h2>
         <div className="flex items-center gap-3">
+          <a
+            href={exportXlsx()}
+            download="scores.xlsx"
+            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-emerald-400 transition-colors"
+          >
+            <FileDown className="w-3.5 h-3.5" /> Export
+          </a>
           <button
             onClick={() => setSortAsc(v => !v)}
             className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors"

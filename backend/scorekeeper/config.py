@@ -3,8 +3,6 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     groq_api_key: str = ""
-    google_sheet_id: str = ""
-    google_service_account_json: str = ""
 
     class Config:
         env_file = ".env"

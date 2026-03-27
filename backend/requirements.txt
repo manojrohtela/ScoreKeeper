@@ -4,6 +4,4 @@ python-dotenv>=1.0.1
 python-multipart
 groq
 pydantic-settings
-gspread
-google-auth
-google-auth-oauthlib
+openpyxl
