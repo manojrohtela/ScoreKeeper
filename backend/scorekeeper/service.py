@@ -67,10 +67,26 @@ def _init_db() -> None:
             CREATE TABLE IF NOT EXISTS scores (
                 username TEXT    NOT NULL,
                 match_id INTEGER NOT NULL REFERENCES matches(id),
-                points   INTEGER NOT NULL DEFAULT 0,
+                points   REAL    NOT NULL DEFAULT 0,
                 PRIMARY KEY (username, match_id)
             )
         """)
+        # Migrate existing INTEGER column to REAL if needed
+        col_info = con.execute("PRAGMA table_info(scores)").fetchall()
+        for col in col_info:
+            if col["name"] == "points" and col["type"].upper() == "INTEGER":
+                con.execute("ALTER TABLE scores RENAME TO scores_old")
+                con.execute("""
+                    CREATE TABLE scores (
+                        username TEXT    NOT NULL,
+                        match_id INTEGER NOT NULL REFERENCES matches(id),
+                        points   REAL    NOT NULL DEFAULT 0,
+                        PRIMARY KEY (username, match_id)
+                    )
+                """)
+                con.execute("INSERT INTO scores SELECT username, match_id, CAST(points AS REAL) FROM scores_old")
+                con.execute("DROP TABLE scores_old")
+                break
 
         # Seed default admin code if not set
         con.execute(
