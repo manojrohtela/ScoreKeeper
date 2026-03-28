@@ -34,6 +34,10 @@ async def upload_match(file: UploadFile = File(...)):
     image_bytes = await file.read()
     try:
         players = get_service().extract_from_image(image_bytes, file.content_type or "image/jpeg")
+    except ValueError as e:
+        raise HTTPException(413, str(e))
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
     except Exception as e:
         raise HTTPException(500, f"Image extraction failed: {e}")
     return ExtractResponse(players=players)
@@ -72,6 +76,8 @@ def get_standings():
 def chat(req: ChatRequest):
     try:
         return ChatResponse(answer=get_service().chat(req.question))
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
     except Exception as e:
         raise HTTPException(500, str(e))
 

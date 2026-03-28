@@ -103,6 +103,7 @@ function Leaderboard({ data, onRefresh, loading }: {
 
 // ─── Upload (with code gate + verify step) ────────────────────────────────────
 type UploadStep = 'code' | 'image' | 'verify' | 'done';
+const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
 
 function UploadMatch({ onSuccess }: { onSuccess: () => void }) {
   const [step, setStep] = useState<UploadStep>('code');
@@ -142,6 +143,12 @@ function UploadMatch({ onSuccess }: { onSuccess: () => void }) {
   };
 
   const handleFile = (f: File) => {
+    if (f.size > MAX_UPLOAD_BYTES) {
+      setFile(null);
+      setPreview(null);
+      setExtractErr('Image is too large. Please use a photo under 3 MB.');
+      return;
+    }
     setFile(f); setPreview(URL.createObjectURL(f)); setExtractErr('');
   };
 

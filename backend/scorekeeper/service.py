@@ -10,6 +10,7 @@ from groq import Groq
 from .config import get_settings
 
 DB_PATH = Path(__file__).parent / "scores.db"
+MAX_IMAGE_BYTES = 3 * 1024 * 1024
 
 # ── Fixed 8 players ──────────────────────────────────────────────────────────
 FIXED_PLAYERS: list[tuple[str, str]] = [
@@ -96,9 +97,19 @@ def _fuzzy_match(raw: str, usernames: list[str]) -> tuple[str, float]:
 # ── Service ───────────────────────────────────────────────────────────────────
 class ScoreKeeperService:
     def __init__(self):
-        self.groq = Groq(api_key=get_settings().groq_api_key)
         _init_db()
         self._usernames = [u for u, _ in FIXED_PLAYERS]
+        self._groq: Groq | None = None
+
+    def _get_groq(self) -> Groq:
+        api_key = get_settings().groq_api_key.strip()
+        if not api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY is not configured. Set it in backend/.env before using upload or chat."
+            )
+        if self._groq is None:
+            self._groq = Groq(api_key=api_key)
+        return self._groq
 
     # ── Admin code ─────────────────────────────────────────────────────────
 
@@ -123,8 +134,13 @@ class ScoreKeeperService:
         Call vision LLM, fuzzy-map names to the 8 fixed players.
         Returns list of {username, display_name, raw_name, points} for ALL 8 players.
         """
+        if len(image_bytes) > MAX_IMAGE_BYTES:
+            raise ValueError(
+                "Image is too large for vision upload. Please use a photo under 3 MB."
+            )
+        groq = self._get_groq()
         b64 = base64.b64encode(image_bytes).decode()
-        completion = self.groq.chat.completions.create(
+        completion = groq.chat.completions.create(
             model="meta-llama/llama-4-scout-17b-16e-instruct",
             messages=[{
                 "role": "user",
@@ -267,6 +283,7 @@ class ScoreKeeperService:
     # ── Chat ────────────────────────────────────────────────────────────────
 
     def chat(self, question: str) -> str:
+        groq = self._get_groq()
         data = self.get_standings()
         if not data["match_headers"]:
             return "अभी तक कोई match data नहीं है। / No match data yet. Please upload a match image first."
@@ -279,8 +296,8 @@ class ScoreKeeperService:
                 f"— Total: {p['total']} | {details}"
             )
 
-        completion = self.groq.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        completion = groq.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             messages=[
                 {
                     "role": "system",
