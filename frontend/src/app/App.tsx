@@ -345,29 +345,86 @@ function UploadMatch({ onSuccess }: { onSuccess: () => void }) {
 }
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
+type ChatMode = 'normal' | 'awaiting_old_code' | 'awaiting_new_code';
+
+function isChangeCodeIntent(text: string): boolean {
+  const t = text.toLowerCase();
+  return (
+    (t.includes('change') && t.includes('code')) ||
+    (t.includes('code') && (t.includes('badal') || t.includes('update'))) ||
+    t.includes('secret code') ||
+    t.includes('admin code') ||
+    (t.includes('naya') && t.includes('code')) ||
+    t.includes('code change')
+  );
+}
+
 function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([{
     role: 'assistant',
-    content: 'नमस्ते! 👋 Match points ke baare mein kuch bhi pucho — Hindi ya English mein.\n\nExample: "Match 3 mein sabse zyada points kisne liye?" or "Who is in last place?"',
+    content: 'नमस्ते! 👋 Match points ke baare mein kuch bhi pucho — Hindi ya English mein.\n\nExample: "Match 3 mein sabse zyada points kisne liye?" or "Who is in last place?"\n\nAdmin code change karna ho toh bolo: "change secret code"',
   }]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [chatMode, setChatMode] = useState<ChatMode>('normal');
+  const [pendingOldCode, setPendingOldCode] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const isSecretStep = chatMode !== 'normal';
+
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  const addMsg = (role: 'user' | 'assistant', content: string) =>
+    setMessages(m => [...m, { role, content }]);
 
   const send = async () => {
     const q = input.trim();
     if (!q || loading) return;
     setInput('');
-    setMessages(m => [...m, { role: 'user', content: q }]);
+
+    // Show user message (mask if it's a secret code step)
+    addMsg('user', isSecretStep ? '••••••••' : q);
     setLoading(true);
+
     try {
+      // ── Change-code flow ──────────────────────────────────────────────
+      if (chatMode === 'normal' && isChangeCodeIntent(q)) {
+        addMsg('assistant', '🔐 Admin code change karna chahte ho?\nPehle purana / old code batao:');
+        setChatMode('awaiting_old_code');
+        return;
+      }
+
+      if (chatMode === 'awaiting_old_code') {
+        const { valid } = await verifyCode(q);
+        if (valid) {
+          setPendingOldCode(q);
+          setChatMode('awaiting_new_code');
+          addMsg('assistant', '✅ Purana code sahi hai!\nAb naya / new code batao:');
+        } else {
+          addMsg('assistant', '❌ Galat purana code hai. Dobara try karo ya cancel karne ke liye kuch aur pucho.');
+          setChatMode('normal');
+        }
+        return;
+      }
+
+      if (chatMode === 'awaiting_new_code') {
+        const { success, message } = await changeCode(pendingOldCode, q);
+        addMsg('assistant', success ? `✅ ${message}` : `❌ ${message}`);
+        setChatMode('normal');
+        setPendingOldCode('');
+        return;
+      }
+
+      // ── Normal chat ───────────────────────────────────────────────────
       const { answer } = await sendChat(q);
-      setMessages(m => [...m, { role: 'assistant', content: answer }]);
+      addMsg('assistant', answer);
+
     } catch (e: unknown) {
-      setMessages(m => [...m, { role: 'assistant', content: `❌ ${e instanceof Error ? e.message : 'Error'}` }]);
-    } finally { setLoading(false); }
+      addMsg('assistant', `❌ ${e instanceof Error ? e.message : 'Something went wrong'}`);
+      setChatMode('normal');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -396,11 +453,27 @@ function Chat() {
         )}
         <div ref={bottomRef} />
       </div>
+
+      {/* Hint bar when in code-change mode */}
+      {isSecretStep && (
+        <div className="flex items-center gap-2 text-xs text-amber-400/80 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 mb-2">
+          <Lock className="w-3.5 h-3.5 shrink-0" />
+          {chatMode === 'awaiting_old_code' ? 'Purana code type karo — it will be hidden' : 'Naya code type karo — it will be hidden'}
+        </div>
+      )}
+
       <div className="flex gap-2">
-        <input value={input} onChange={e => setInput(e.target.value)}
+        <input
+          type={isSecretStep ? 'password' : 'text'}
+          value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
-          placeholder="Match 2 mein mere kitne points hain? / Who leads overall?"
-          className="flex-1 bg-slate-800 border border-slate-700/50 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500/60 transition-colors" />
+          placeholder={
+            chatMode === 'awaiting_old_code' ? 'Purana / old code…' :
+            chatMode === 'awaiting_new_code' ? 'Naya / new code…' :
+            'Match 2 mein mere kitne points hain? / Who leads?'
+          }
+          className="flex-1 bg-slate-800 border border-slate-700/50 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500/60 transition-colors"
+        />
         <button onClick={send} disabled={!input.trim() || loading}
           className="bg-indigo-600 hover:bg-indigo-500 text-white p-3 rounded-xl transition-colors disabled:opacity-40">
           <Send className="w-4 h-4" />
