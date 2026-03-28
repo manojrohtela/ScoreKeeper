@@ -2,10 +2,12 @@ import base64
 import json
 import re
 import sqlite3
+from io import BytesIO
 from difflib import SequenceMatcher
 from pathlib import Path
 
 from groq import Groq
+from PIL import Image, ImageEnhance, ImageOps
 
 from .config import get_settings
 from .constants import (
@@ -20,8 +22,15 @@ from .constants import (
     MATCHABLE_USERNAMES,
     NO_MATCH_DATA_MESSAGE,
     PLAYER_ALIAS_TO_CANONICAL,
+    VISION_IMAGE_CONTRAST,
+    VISION_IMAGE_MAX_DIMENSION,
+    VISION_IMAGE_MIN_DIMENSION,
+    VISION_IMAGE_SHARPNESS,
+    VISION_IMAGE_UPSCALE_FACTOR,
     VISION_MODEL,
+    VISION_CROP_PROMPT,
     VISION_PROMPT,
+    VISION_ROW_CROP_BANDS,
 )
 
 DB_PATH = Path(__file__).parent / DB_FILENAME
@@ -98,6 +107,119 @@ def _canonical_username(username: str) -> str:
     return PLAYER_ALIAS_TO_CANONICAL.get(username, username)
 
 
+def _prepare_image_for_vision(image_bytes: bytes) -> bytes:
+    """Lightly upscale and sharpen screenshots so small leaderboard text is easier to read."""
+    with Image.open(BytesIO(image_bytes)) as img:
+        img = ImageOps.exif_transpose(img).convert("RGB")
+        short_dim = min(img.size)
+        max_dim = max(img.size)
+        if short_dim < VISION_IMAGE_MIN_DIMENSION:
+            scale = min(
+                VISION_IMAGE_UPSCALE_FACTOR,
+                VISION_IMAGE_MAX_DIMENSION / max_dim,
+                VISION_IMAGE_MIN_DIMENSION / short_dim,
+            )
+            if scale > 1:
+                new_size = (
+                    max(1, int(round(img.width * scale))),
+                    max(1, int(round(img.height * scale))),
+                )
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+        elif max_dim > VISION_IMAGE_MAX_DIMENSION:
+            img.thumbnail(
+                (VISION_IMAGE_MAX_DIMENSION, VISION_IMAGE_MAX_DIMENSION),
+                Image.Resampling.LANCZOS,
+            )
+
+        img = ImageEnhance.Contrast(img).enhance(VISION_IMAGE_CONTRAST)
+        img = ImageEnhance.Sharpness(img).enhance(VISION_IMAGE_SHARPNESS)
+
+        buf = BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+
+
+def _prepare_image_crop_for_vision(image_bytes: bytes, crop_box: tuple[float, float, float, float] | None = None) -> bytes:
+    with Image.open(BytesIO(image_bytes)) as img:
+        img = ImageOps.exif_transpose(img).convert("RGB")
+        if crop_box is not None:
+            left = int(round(img.width * crop_box[0]))
+            top = int(round(img.height * crop_box[1]))
+            right = int(round(img.width * crop_box[2]))
+            bottom = int(round(img.height * crop_box[3]))
+            img = img.crop((left, top, right, bottom))
+
+        short_dim = min(img.size)
+        max_dim = max(img.size)
+        if short_dim < VISION_IMAGE_MIN_DIMENSION:
+            scale = min(
+                VISION_IMAGE_UPSCALE_FACTOR,
+                VISION_IMAGE_MAX_DIMENSION / max_dim,
+                VISION_IMAGE_MIN_DIMENSION / short_dim,
+            )
+            if scale > 1:
+                new_size = (
+                    max(1, int(round(img.width * scale))),
+                    max(1, int(round(img.height * scale))),
+                )
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+        elif max_dim > VISION_IMAGE_MAX_DIMENSION:
+            img.thumbnail(
+                (VISION_IMAGE_MAX_DIMENSION, VISION_IMAGE_MAX_DIMENSION),
+                Image.Resampling.LANCZOS,
+            )
+
+        img = ImageEnhance.Contrast(img).enhance(VISION_IMAGE_CONTRAST)
+        img = ImageEnhance.Sharpness(img).enhance(VISION_IMAGE_SHARPNESS)
+
+        buf = BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+
+
+def _vision_image_variants(image_bytes: bytes) -> list[bytes]:
+    variants = [_prepare_image_for_vision(image_bytes)]
+    # Overlapping row crops give the model a much larger effective zoom on each leaderboard line.
+    variants.extend(_prepare_image_crop_for_vision(image_bytes, band) for band in VISION_ROW_CROP_BANDS)
+    return variants
+
+
+def _extract_players_from_result(
+    result: dict,
+    matchable_usernames: list[str],
+) -> dict[str, tuple[float, str, float]]:
+    extracted: dict[str, tuple[float, str, float]] = {}
+    for p in result.get("players", []):
+        name = str(p.get("name", "")).strip()
+        pts_raw = str(p.get("points", "0")).strip().replace(",", "")
+        if not name or not re.fullmatch(r"-?\d+(?:\.\d+)?", pts_raw):
+            continue
+        username, ratio = _fuzzy_match(name, matchable_usernames)
+        username = _canonical_username(username)
+        if ratio < 0.5:
+            continue
+
+        try:
+            points = float(pts_raw)
+        except ValueError:
+            continue
+        current = extracted.get(username)
+        if current is None or ratio > current[2] or (ratio == current[2] and current[0] == 0 and points != 0):
+            extracted[username] = (points, name, ratio)
+    return extracted
+
+
+def _build_vision_prompt(base_prompt: str, candidate_usernames: list[str]) -> str:
+    candidates = "\n".join(f"- {username}" for username in candidate_usernames)
+    return (
+        f"{base_prompt}\n"
+        "Choose names from this exact candidate list whenever possible:\n"
+        f"{candidates}\n"
+        "Prefer the closest visible candidate if the text is blurry.\n"
+        "Do not invent usernames outside the list."
+    )
+
+
 # ── Service ───────────────────────────────────────────────────────────────────
 class ScoreKeeperService:
     def __init__(self):
@@ -140,47 +262,46 @@ class ScoreKeeperService:
         if len(image_bytes) > MAX_IMAGE_BYTES:
             raise ValueError(IMAGE_TOO_LARGE_ERROR)
         groq = self._get_groq()
-        b64 = base64.b64encode(image_bytes).decode()
-        completion = groq.chat.completions.create(
-            model=VISION_MODEL,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{content_type};base64,{b64}"},
-                    },
-                    {
-                        "type": "text",
-                        "text": VISION_PROMPT,
-                    },
-                ],
-            }],
-            max_tokens=1024,
-        )
+        extracted: dict[str, tuple[float, str, float]] = {}
+        for variant_index, prepared_bytes in enumerate(_vision_image_variants(image_bytes)):
+            b64 = base64.b64encode(prepared_bytes).decode()
+            prompt = _build_vision_prompt(
+                VISION_PROMPT if variant_index == 0 else VISION_CROP_PROMPT,
+                self._matchable_usernames,
+            )
+            completion = groq.chat.completions.create(
+                model=VISION_MODEL,
+                temperature=0,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{b64}"},
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt,
+                        },
+                    ],
+                }],
+                max_tokens=1024,
+            )
 
-        raw = re.sub(r"```(?:json)?", "", completion.choices[0].message.content or "").strip()
-        try:
-            result = json.loads(raw)
-        except Exception:
-            m = re.search(r"\{.*\}", raw, re.DOTALL)
-            result = json.loads(m.group()) if m else {}
+            raw = re.sub(r"```(?:json)?", "", completion.choices[0].message.content or "").strip()
+            try:
+                result = json.loads(raw)
+            except Exception:
+                m = re.search(r"\{.*\}", raw, re.DOTALL)
+                result = json.loads(m.group()) if m else {}
 
-        extracted: dict[str, int] = {}   # raw_name → points (before mapping)
-        matched_raw: dict[str, str] = {} # username → raw_name
-
-        for p in result.get("players", []):
-            name = str(p.get("name", "")).strip()
-            pts_raw = str(p.get("points", "0")).lstrip("-")
-            if not name or not pts_raw.isdigit():
-                continue
-            username, ratio = _fuzzy_match(name, self._matchable_usernames)
-            username = _canonical_username(username)
-            if ratio >= 0.5:
-                # Only overwrite if this is a better match
-                if username not in extracted or ratio > 0:
-                    extracted[username] = int(p["points"])
-                    matched_raw[username] = name
+            variant_extracted = _extract_players_from_result(result, self._matchable_usernames)
+            for username, candidate in variant_extracted.items():
+                current = extracted.get(username)
+                if current is None or candidate[2] > current[2] or (
+                    candidate[2] == current[2] and current[0] == 0 and candidate[0] != 0
+                ):
+                    extracted[username] = candidate
 
         # Build full list of all 8 players
         player_map = {u: dn for u, dn in FIXED_PLAYERS}
@@ -188,8 +309,8 @@ class ScoreKeeperService:
             {
                 "username":     u,
                 "display_name": player_map[u],
-                "raw_name":     matched_raw.get(u, "—"),
-                "points":       extracted.get(u, 0),
+                "raw_name":     extracted.get(u, (0, "—", 0.0))[1],
+                "points":       extracted.get(u, (0, "—", 0.0))[0],
             }
             for u in self._usernames
         ]

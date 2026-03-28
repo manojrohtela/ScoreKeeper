@@ -4,7 +4,7 @@ import type {
   StandingsResponse,
 } from './types';
 
-const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/scorekeeper').replace(/\/$/, '');
+const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001/api/scorekeeper').replace(/\/$/, '');
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${BASE}${path}`, init);

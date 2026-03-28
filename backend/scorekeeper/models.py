@@ -6,8 +6,8 @@ class PlayerStanding(BaseModel):
     rank: int
     username: str
     display_name: str
-    total: int
-    matches: dict[str, int]
+    total: float
+    matches: dict[str, float]
 
 
 class StandingsResponse(BaseModel):
@@ -23,7 +23,7 @@ class MatchSummary(BaseModel):
 class AdminMatchPlayer(BaseModel):
     username: str
     display_name: str
-    points: int
+    points: float
 
 
 class AdminMatchDetailResponse(BaseModel):
@@ -41,7 +41,7 @@ class ExtractedPlayer(BaseModel):
     username: str
     display_name: str
     raw_name: str      # what the AI actually read from the image
-    points: int
+    points: float
 
 
 class ExtractResponse(BaseModel):
@@ -51,7 +51,7 @@ class ExtractResponse(BaseModel):
 # ── Confirm upload ──────────────────────────────────────────────────────────
 class PlayerScore(BaseModel):
     username: str
-    points: int
+    points: float
 
 
 class ConfirmUploadRequest(BaseModel):

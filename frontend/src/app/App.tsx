@@ -306,11 +306,13 @@ function UploadMatch({ onSuccess }: { onSuccess: () => void }) {
                     </td>
                     <td className="px-4 py-2.5">
                       <input
-                        type="number" min={0}
+                        type="number"
+                        min={0}
+                        step="0.5"
                         value={players[i].points}
                         onChange={e => {
                           const updated = [...players];
-                          updated[i] = { ...updated[i], points: parseInt(e.target.value) || 0 };
+                          updated[i] = { ...updated[i], points: parseFloat(e.target.value) || 0 };
                           setPlayers(updated);
                         }}
                         className="w-20 mx-auto block bg-slate-700 border border-slate-600 rounded-lg px-2 py-1.5 text-center text-white text-sm focus:outline-none focus:border-indigo-500/60"
@@ -746,10 +748,11 @@ function AdminPanel({ onSuccess }: { onSuccess: () => void }) {
                     <input
                       type="number"
                       min={0}
+                      step="0.5"
                       value={players[i].points}
                       onChange={e => {
                         const updated = [...players];
-                        updated[i] = { ...updated[i], points: parseInt(e.target.value) || 0 };
+                        updated[i] = { ...updated[i], points: parseFloat(e.target.value) || 0 };
                         setPlayers(updated);
                       }}
                       className="w-24 mx-auto block bg-slate-700 border border-slate-600 rounded-lg px-2 py-1.5 text-center text-white text-sm focus:outline-none focus:border-indigo-500/60"
