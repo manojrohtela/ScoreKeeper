@@ -1,36 +1,63 @@
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
 
-from .models import ChatRequest, ChatResponse, StandingsResponse, UploadResponse
+from .models import (
+    ChangeCodeRequest, ChangeCodeResponse,
+    ChatRequest, ChatResponse,
+    ConfirmUploadRequest, ConfirmUploadResponse,
+    ExtractResponse,
+    StandingsResponse,
+    VerifyCodeRequest, VerifyCodeResponse,
+)
 from .service import get_service
 
 router = APIRouter()
 
 
-@router.post("/upload", response_model=UploadResponse)
+# ── Admin code ────────────────────────────────────────────────────────────────
+@router.post("/verify-code", response_model=VerifyCodeResponse)
+def verify_code(req: VerifyCodeRequest):
+    return VerifyCodeResponse(valid=get_service().verify_code(req.code))
+
+
+@router.post("/change-code", response_model=ChangeCodeResponse)
+def change_code(req: ChangeCodeRequest):
+    success, message = get_service().change_code(req.old_code, req.new_code)
+    return ChangeCodeResponse(success=success, message=message)
+
+
+# ── Upload: extract only (no save) ───────────────────────────────────────────
+@router.post("/upload", response_model=ExtractResponse)
 async def upload_match(file: UploadFile = File(...)):
     if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(400, "Only image files are supported (JPEG, PNG, etc.)")
-    svc = get_service()
+        raise HTTPException(400, "Only image files are supported.")
     image_bytes = await file.read()
     try:
-        extracted = svc.parse_image(image_bytes, file.content_type or "image/jpeg")
+        players = get_service().extract_from_image(image_bytes, file.content_type or "image/jpeg")
     except Exception as e:
-        raise HTTPException(500, f"Image parsing failed: {e}")
-    if not extracted:
-        raise HTTPException(422, "Could not extract any player scores. Please try a clearer image.")
+        raise HTTPException(500, f"Image extraction failed: {e}")
+    return ExtractResponse(players=players)
+
+
+# ── Confirm: verify code + save ───────────────────────────────────────────────
+@router.post("/confirm-upload", response_model=ConfirmUploadResponse)
+def confirm_upload(req: ConfirmUploadRequest):
+    if not get_service().verify_code(req.code):
+        raise HTTPException(401, "Invalid admin code.")
     try:
-        match_name, match_number = svc.add_match(extracted)
+        match_name, match_number = get_service().save_match(
+            [p.model_dump() for p in req.players]
+        )
     except Exception as e:
-        raise HTTPException(500, f"Failed to save to database: {e}")
-    return UploadResponse(
+        raise HTTPException(500, f"Failed to save: {e}")
+    return ConfirmUploadResponse(
         match_name=match_name,
         match_number=match_number,
-        extracted=extracted,
-        message=f"{match_name} saved — {len(extracted)} player(s) recorded.",
+        message=f"{match_name} saved successfully with {len(req.players)} players.",
     )
 
 
+# ── Standings ─────────────────────────────────────────────────────────────────
 @router.get("/standings", response_model=StandingsResponse)
 def get_standings():
     try:
@@ -40,6 +67,7 @@ def get_standings():
         raise HTTPException(500, str(e))
 
 
+# ── Chat ──────────────────────────────────────────────────────────────────────
 @router.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     try:
@@ -48,12 +76,12 @@ def chat(req: ChatRequest):
         raise HTTPException(500, str(e))
 
 
+# ── Export ────────────────────────────────────────────────────────────────────
 @router.get("/export")
 def export_xlsx():
     try:
-        xlsx_bytes = get_service().export_xlsx()
         return Response(
-            content=xlsx_bytes,
+            content=get_service().export_xlsx(),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": "attachment; filename=scores.xlsx"},
         )

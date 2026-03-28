@@ -1,6 +1,7 @@
 export interface PlayerStanding {
   rank: number;
-  name: string;
+  username: string;
+  display_name: string;
   total: number;
   matches: Record<string, number>;
 }
@@ -10,10 +11,20 @@ export interface StandingsResponse {
   match_headers: string[];
 }
 
-export interface UploadResponse {
+export interface ExtractedPlayer {
+  username: string;
+  display_name: string;
+  raw_name: string;   // what AI read from image
+  points: number;
+}
+
+export interface ExtractResponse {
+  players: ExtractedPlayer[];
+}
+
+export interface ConfirmUploadResponse {
   match_name: string;
   match_number: number;
-  extracted: Record<string, number>;
   message: string;
 }
 

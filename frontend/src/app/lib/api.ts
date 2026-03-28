@@ -1,4 +1,7 @@
-import type { ChatResponse, StandingsResponse, UploadResponse } from './types';
+import type {
+  ChatResponse, ConfirmUploadResponse,
+  ExtractResponse, StandingsResponse,
+} from './types';
 
 const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/scorekeeper').replace(/\/$/, '');
 
@@ -15,11 +18,35 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const getStandings = (): Promise<StandingsResponse> =>
   req<StandingsResponse>('/standings');
 
-export const uploadMatch = (file: File): Promise<UploadResponse> => {
+export const verifyCode = (code: string): Promise<{ valid: boolean }> =>
+  req('/verify-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+
+export const changeCode = (old_code: string, new_code: string): Promise<{ success: boolean; message: string }> =>
+  req('/change-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ old_code, new_code }),
+  });
+
+export const extractFromImage = (file: File): Promise<ExtractResponse> => {
   const form = new FormData();
   form.append('file', file);
-  return req<UploadResponse>('/upload', { method: 'POST', body: form });
+  return req<ExtractResponse>('/upload', { method: 'POST', body: form });
 };
+
+export const confirmUpload = (
+  code: string,
+  players: { username: string; points: number }[],
+): Promise<ConfirmUploadResponse> =>
+  req<ConfirmUploadResponse>('/confirm-upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, players }),
+  });
 
 export const sendChat = (question: string): Promise<ChatResponse> =>
   req<ChatResponse>('/chat', {
