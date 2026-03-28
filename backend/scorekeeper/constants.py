@@ -6,15 +6,35 @@ MAX_IMAGE_BYTES = 3 * 1024 * 1024
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 CHAT_MODEL = "llama-3.3-70b-versatile"
 
+PLAYER_DEFINITIONS: list[dict[str, object]] = [
+    {
+        "username": "dheeraj3515",
+        "display_name": "Dheeraj comptition wale",
+        "aliases": ["dhee13101671", "dheeraj3551"],
+    },
+    {"username": "BishanRocks", "display_name": "Bishan ji photo wale", "aliases": []},
+    {"username": "SagarJajoriya", "display_name": "Sagar AI news wale", "aliases": []},
+    {"username": "devbanna11", "display_name": "Dev ji pornhub wale", "aliases": []},
+    {"username": "m_cynophilist", "display_name": "Manoj Gyanchodi wale", "aliases": []},
+    {"username": "RahulIndiaRock", "display_name": "Rahul Sir paise wale", "aliases": []},
+    {"username": "Gambler.gb.rcb", "display_name": "Pandey ji 3 baar call wale", "aliases": []},
+    {"username": "amitp0107", "display_name": "Amit hamesha gayab rhne wale", "aliases": []},
+]
+
 FIXED_PLAYERS: list[tuple[str, str]] = [
-    ("dheeraj3515",    "Dheeraj comptition wale"),
-    ("BishanRocks",    "Bishan ji photo wale"),
-    ("SagarJajoriya",  "Sagar AI news wale"),
-    ("devbanna11",     "Dev ji pornhub wale"),
-    ("m_cynophilist",  "Manoj Gyanchodi wale"),
-    ("RahulIndiaRock", "Rahul Sir paise wale"),
-    ("Gambler.gb.rcb", "Pandey ji 3 baar call wale"),
-    ("amitp0107",      "Amit hamesha gayab rhne wale"),
+    (str(player["username"]), str(player["display_name"])) for player in PLAYER_DEFINITIONS
+]
+
+PLAYER_ALIAS_TO_CANONICAL: dict[str, str] = {
+    alias: str(player["username"])
+    for player in PLAYER_DEFINITIONS
+    for alias in player.get("aliases", [])
+}
+
+MATCHABLE_USERNAMES: list[str] = [
+    str(player["username"]) for player in PLAYER_DEFINITIONS
+] + [
+    alias for player in PLAYER_DEFINITIONS for alias in player.get("aliases", [])
 ]
 
 GROQ_KEY_MISSING_ERROR = (

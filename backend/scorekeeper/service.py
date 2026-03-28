@@ -17,7 +17,9 @@ from .constants import (
     GROQ_KEY_MISSING_ERROR,
     IMAGE_TOO_LARGE_ERROR,
     MAX_IMAGE_BYTES,
+    MATCHABLE_USERNAMES,
     NO_MATCH_DATA_MESSAGE,
+    PLAYER_ALIAS_TO_CANONICAL,
     VISION_MODEL,
     VISION_PROMPT,
 )
@@ -92,11 +94,16 @@ def _fuzzy_match(raw: str, usernames: list[str]) -> tuple[str, float]:
     return best, best_ratio
 
 
+def _canonical_username(username: str) -> str:
+    return PLAYER_ALIAS_TO_CANONICAL.get(username, username)
+
+
 # ── Service ───────────────────────────────────────────────────────────────────
 class ScoreKeeperService:
     def __init__(self):
         _init_db()
         self._usernames = [u for u, _ in FIXED_PLAYERS]
+        self._matchable_usernames = MATCHABLE_USERNAMES
         self._groq: Groq | None = None
 
     def _get_groq(self) -> Groq:
@@ -167,7 +174,8 @@ class ScoreKeeperService:
             pts_raw = str(p.get("points", "0")).lstrip("-")
             if not name or not pts_raw.isdigit():
                 continue
-            username, ratio = _fuzzy_match(name, self._usernames)
+            username, ratio = _fuzzy_match(name, self._matchable_usernames)
+            username = _canonical_username(username)
             if ratio >= 0.5:
                 # Only overwrite if this is a better match
                 if username not in extracted or ratio > 0:
@@ -196,10 +204,11 @@ class ScoreKeeperService:
             cur = con.execute("INSERT INTO matches (name) VALUES (?)", (match_name,))
             match_id = cur.lastrowid
             for ps in player_scores:
+                username = _canonical_username(ps["username"])
                 con.execute(
                     "INSERT INTO scores (username, match_id, points) VALUES (?,?,?)"
                     " ON CONFLICT(username, match_id) DO UPDATE SET points=excluded.points",
-                    (ps["username"], match_id, ps["points"]),
+                    (username, match_id, ps["points"]),
                 )
         return match_name, match_number
 
@@ -218,7 +227,9 @@ class ScoreKeeperService:
                 (match_id,),
             ).fetchall()
 
-        score_map = {row["username"]: row["points"] for row in scores}
+        score_map: dict[str, int] = {}
+        for row in scores:
+            score_map[_canonical_username(row["username"])] = row["points"]
         player_map = {u: dn for u, dn in FIXED_PLAYERS}
         players = [
             {
@@ -240,10 +251,11 @@ class ScoreKeeperService:
             if match is None:
                 raise ValueError("Match not found.")
             for ps in player_scores:
+                username = _canonical_username(ps["username"])
                 con.execute(
                     "INSERT INTO scores (username, match_id, points) VALUES (?,?,?) "
                     "ON CONFLICT(username, match_id) DO UPDATE SET points=excluded.points",
-                    (ps["username"], match_id, ps["points"]),
+                    (username, match_id, ps["points"]),
                 )
         return match["name"], match_id
 
@@ -271,7 +283,8 @@ class ScoreKeeperService:
 
         score_map: dict[str, dict[int, int]] = {}
         for row in scores:
-            score_map.setdefault(row["username"], {})[row["match_id"]] = row["points"]
+            username = _canonical_username(row["username"])
+            score_map.setdefault(username, {})[row["match_id"]] = row["points"]
 
         standings = []
         for p in players:
