@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Trophy, Upload, MessageSquare, RefreshCw, FileDown,
@@ -858,7 +858,7 @@ export default function App() {
 
   useEffect(() => { fetchStandings(); }, [fetchStandings]);
 
-  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  const tabs: { id: Tab; label: string; icon: ReactNode }[] = [
     { id: 'leaderboard', label: APP_TEXT.tabs.leaderboard, icon: <Trophy className="w-4 h-4" /> },
     { id: 'upload',      label: APP_TEXT.tabs.upload, icon: <Upload className="w-4 h-4" /> },
   ];
