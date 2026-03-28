@@ -11,6 +11,32 @@ export interface StandingsResponse {
   match_headers: string[];
 }
 
+export interface AdminMatchSummary {
+  id: number;
+  name: string;
+}
+
+export interface AdminMatchPlayer {
+  username: string;
+  display_name: string;
+  points: number;
+}
+
+export interface AdminMatchDetail {
+  match_id: number;
+  match_name: string;
+  players: AdminMatchPlayer[];
+}
+
+export interface MatchListResponse {
+  matches: AdminMatchSummary[];
+}
+
+export interface AdminActionResponse {
+  success: boolean;
+  message: string;
+}
+
 export interface ExtractedPlayer {
   username: string;
   display_name: string;

@@ -8,23 +8,21 @@ from pathlib import Path
 from groq import Groq
 
 from .config import get_settings
+from .constants import (
+    CHAT_MODEL,
+    CHAT_SYSTEM_PROMPT_PREFIX,
+    DB_FILENAME,
+    DEFAULT_ADMIN_CODE,
+    FIXED_PLAYERS,
+    GROQ_KEY_MISSING_ERROR,
+    IMAGE_TOO_LARGE_ERROR,
+    MAX_IMAGE_BYTES,
+    NO_MATCH_DATA_MESSAGE,
+    VISION_MODEL,
+    VISION_PROMPT,
+)
 
-DB_PATH = Path(__file__).parent / "scores.db"
-MAX_IMAGE_BYTES = 3 * 1024 * 1024
-
-# ── Fixed 8 players ──────────────────────────────────────────────────────────
-FIXED_PLAYERS: list[tuple[str, str]] = [
-    ("dheeraj3515",    "Dheeraj comptition wale"),
-    ("BishanRocks",    "Bishan ji photo wale"),
-    ("SagarJajoriya",  "Sagar AI news wale"),
-    ("devbanna11",     "Dev ji pornhub wale"),
-    ("m_cynophilist",  "Manoj Gyanchodi wale"),
-    ("RahulIndiaRock", "Rahul Sir paise wale"),
-    ("Gambler.gb.rcb", "Pandey ji 3 baar call wale"),
-    ("amitp0107",      "Amit hamesha gayab rhne wale"),
-]
-
-DEFAULT_CODE = "dheeraj351"
+DB_PATH = Path(__file__).parent / DB_FILENAME
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -66,7 +64,7 @@ def _init_db() -> None:
         # Seed default admin code if not set
         con.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES ('admin_code', ?)",
-            (DEFAULT_CODE,),
+            (DEFAULT_ADMIN_CODE,),
         )
 
         # Seed fixed players
@@ -104,9 +102,7 @@ class ScoreKeeperService:
     def _get_groq(self) -> Groq:
         api_key = get_settings().groq_api_key.strip()
         if not api_key:
-            raise RuntimeError(
-                "GROQ_API_KEY is not configured. Set it in backend/.env before using upload or chat."
-            )
+            raise RuntimeError(GROQ_KEY_MISSING_ERROR)
         if self._groq is None:
             self._groq = Groq(api_key=api_key)
         return self._groq
@@ -135,13 +131,11 @@ class ScoreKeeperService:
         Returns list of {username, display_name, raw_name, points} for ALL 8 players.
         """
         if len(image_bytes) > MAX_IMAGE_BYTES:
-            raise ValueError(
-                "Image is too large for vision upload. Please use a photo under 3 MB."
-            )
+            raise ValueError(IMAGE_TOO_LARGE_ERROR)
         groq = self._get_groq()
         b64 = base64.b64encode(image_bytes).decode()
         completion = groq.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            model=VISION_MODEL,
             messages=[{
                 "role": "user",
                 "content": [
@@ -151,13 +145,7 @@ class ScoreKeeperService:
                     },
                     {
                         "type": "text",
-                        "text": (
-                            "Extract every player username/name and their numeric score/points "
-                            "from this image.\n"
-                            "Return ONLY valid JSON — no markdown, no explanation:\n"
-                            '{"players": [{"name": "...", "points": 42}, ...]}\n'
-                            "Keep names exactly as shown."
-                        ),
+                        "text": VISION_PROMPT,
                     },
                 ],
             }],
@@ -203,8 +191,7 @@ class ScoreKeeperService:
     def save_match(self, player_scores: list[dict]) -> tuple[str, int]:
         """player_scores: [{username, points}]"""
         with _conn() as con:
-            count = con.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
-            match_number = count + 1
+            match_number = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM matches").fetchone()[0]
             match_name = f"Match {match_number}"
             cur = con.execute("INSERT INTO matches (name) VALUES (?)", (match_name,))
             match_id = cur.lastrowid
@@ -215,6 +202,64 @@ class ScoreKeeperService:
                     (ps["username"], match_id, ps["points"]),
                 )
         return match_name, match_number
+
+    def list_matches(self) -> list[dict]:
+        with _conn() as con:
+            rows = con.execute("SELECT id, name FROM matches ORDER BY id").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_match(self, match_id: int) -> dict:
+        with _conn() as con:
+            match = con.execute("SELECT id, name FROM matches WHERE id=?", (match_id,)).fetchone()
+            if match is None:
+                raise ValueError("Match not found.")
+            scores = con.execute(
+                "SELECT username, points FROM scores WHERE match_id=?",
+                (match_id,),
+            ).fetchall()
+
+        score_map = {row["username"]: row["points"] for row in scores}
+        player_map = {u: dn for u, dn in FIXED_PLAYERS}
+        players = [
+            {
+                "username": u,
+                "display_name": player_map[u],
+                "points": score_map.get(u, 0),
+            }
+            for u in self._usernames
+        ]
+        return {
+            "match_id": match["id"],
+            "match_name": match["name"],
+            "players": players,
+        }
+
+    def update_match(self, match_id: int, player_scores: list[dict]) -> tuple[str, int]:
+        with _conn() as con:
+            match = con.execute("SELECT name FROM matches WHERE id=?", (match_id,)).fetchone()
+            if match is None:
+                raise ValueError("Match not found.")
+            for ps in player_scores:
+                con.execute(
+                    "INSERT INTO scores (username, match_id, points) VALUES (?,?,?) "
+                    "ON CONFLICT(username, match_id) DO UPDATE SET points=excluded.points",
+                    (ps["username"], match_id, ps["points"]),
+                )
+        return match["name"], match_id
+
+    def delete_match(self, match_id: int) -> str:
+        with _conn() as con:
+            match = con.execute("SELECT name FROM matches WHERE id=?", (match_id,)).fetchone()
+            if match is None:
+                raise ValueError("Match not found.")
+            con.execute("DELETE FROM scores WHERE match_id=?", (match_id,))
+            con.execute("DELETE FROM matches WHERE id=?", (match_id,))
+        return match["name"]
+
+    def reset_data(self) -> None:
+        with _conn() as con:
+            con.execute("DELETE FROM scores")
+            con.execute("DELETE FROM matches")
 
     # ── Standings ───────────────────────────────────────────────────────────
 
@@ -286,7 +331,7 @@ class ScoreKeeperService:
         groq = self._get_groq()
         data = self.get_standings()
         if not data["match_headers"]:
-            return "अभी तक कोई match data नहीं है। / No match data yet. Please upload a match image first."
+            return NO_MATCH_DATA_MESSAGE
 
         lines = ["=== Match Points Data ==="]
         for p in data["players"]:
@@ -297,17 +342,11 @@ class ScoreKeeperService:
             )
 
         completion = groq.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            model=CHAT_MODEL,
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        "You are a helpful points/score assistant for a game leaderboard. "
-                        "Answer questions about player scores and match standings. "
-                        "Players have both a username and a display name — use display names in answers. "
-                        "The user may ask in Hindi or English — always respond in the SAME language. "
-                        "Be concise and friendly.\n\n" + "\n".join(lines)
-                    ),
+                    "content": CHAT_SYSTEM_PROMPT_PREFIX + "\n".join(lines),
                 },
                 {"role": "user", "content": question},
             ],

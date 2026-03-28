@@ -15,6 +15,27 @@ class StandingsResponse(BaseModel):
     match_headers: list[str]
 
 
+class MatchSummary(BaseModel):
+    id: int
+    name: str
+
+
+class AdminMatchPlayer(BaseModel):
+    username: str
+    display_name: str
+    points: int
+
+
+class AdminMatchDetailResponse(BaseModel):
+    match_id: int
+    match_name: str
+    players: list[AdminMatchPlayer]
+
+
+class MatchListResponse(BaseModel):
+    matches: list[MatchSummary]
+
+
 # ── Upload / Extract ────────────────────────────────────────────────────────
 class ExtractedPlayer(BaseModel):
     username: str
@@ -59,6 +80,11 @@ class ChangeCodeRequest(BaseModel):
 
 
 class ChangeCodeResponse(BaseModel):
+    success: bool
+    message: str
+
+
+class AdminActionResponse(BaseModel):
     success: bool
     message: str
 

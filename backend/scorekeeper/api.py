@@ -2,10 +2,13 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from .models import (
+    AdminActionResponse,
+    AdminMatchDetailResponse,
     ChangeCodeRequest, ChangeCodeResponse,
     ChatRequest, ChatResponse,
     ConfirmUploadRequest, ConfirmUploadResponse,
     ExtractResponse,
+    MatchListResponse,
     StandingsResponse,
     VerifyCodeRequest, VerifyCodeResponse,
 )
@@ -24,6 +27,60 @@ def verify_code(req: VerifyCodeRequest):
 def change_code(req: ChangeCodeRequest):
     success, message = get_service().change_code(req.old_code, req.new_code)
     return ChangeCodeResponse(success=success, message=message)
+
+
+# ── Admin: match data management ──────────────────────────────────────────────
+@router.get("/matches", response_model=MatchListResponse)
+def list_matches():
+    return MatchListResponse(matches=get_service().list_matches())
+
+
+@router.get("/matches/{match_id}", response_model=AdminMatchDetailResponse)
+def get_match(match_id: int):
+    try:
+        return AdminMatchDetailResponse(**get_service().get_match(match_id))
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/matches/{match_id}/update", response_model=AdminActionResponse)
+def update_match(match_id: int, req: ConfirmUploadRequest):
+    if not get_service().verify_code(req.code):
+        raise HTTPException(401, "Invalid admin code.")
+    try:
+        match_name, _ = get_service().update_match(
+            match_id,
+            [p.model_dump() for p in req.players],
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Failed to update match: {e}")
+    return AdminActionResponse(success=True, message=f"{match_name} updated successfully.")
+
+
+@router.post("/matches/{match_id}/delete", response_model=AdminActionResponse)
+def delete_match(match_id: int, req: VerifyCodeRequest):
+    if not get_service().verify_code(req.code):
+        raise HTTPException(401, "Invalid admin code.")
+    try:
+        match_name = get_service().delete_match(match_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Failed to delete match: {e}")
+    return AdminActionResponse(success=True, message=f"{match_name} deleted successfully.")
+
+
+@router.post("/reset-data", response_model=AdminActionResponse)
+def reset_data(req: VerifyCodeRequest):
+    if not get_service().verify_code(req.code):
+        raise HTTPException(401, "Invalid admin code.")
+    try:
+        get_service().reset_data()
+    except Exception as e:
+        raise HTTPException(500, f"Failed to reset data: {e}")
+    return AdminActionResponse(success=True, message="All match data has been reset.")
 
 
 # ── Upload: extract only (no save) ───────────────────────────────────────────
