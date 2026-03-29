@@ -38,10 +38,10 @@ class _Conn:
     """Thin wrapper: psycopg2 connection that exposes sqlite3-style .execute()."""
 
     def __init__(self):
-        self._con = psycopg2.connect(
-            get_settings().database_url,
-            cursor_factory=psycopg2.extras.DictCursor,
-        )
+        url = get_settings().database_url
+        if not url:
+            raise RuntimeError("DATABASE_URL is not set. Configure it in your environment.")
+        self._con = psycopg2.connect(url, cursor_factory=psycopg2.extras.DictCursor)
 
     def execute(self, sql: str, params=()):
         cur = self._con.cursor()
