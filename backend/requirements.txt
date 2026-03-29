@@ -6,3 +6,4 @@ groq
 pydantic-settings
 openpyxl
 Pillow
+psycopg2-binary

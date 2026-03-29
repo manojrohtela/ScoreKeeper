@@ -1,11 +1,11 @@
 import base64
 import json
 import re
-import sqlite3
 from io import BytesIO
 from difflib import SequenceMatcher
-from pathlib import Path
 
+import psycopg2
+import psycopg2.extras
 from groq import Groq
 from PIL import Image, ImageEnhance, ImageOps
 
@@ -13,7 +13,6 @@ from .config import get_settings
 from .constants import (
     CHAT_MODEL,
     CHAT_SYSTEM_PROMPT_PREFIX,
-    DB_FILENAME,
     DEFAULT_ADMIN_CODE,
     FIXED_PLAYERS,
     GROQ_KEY_MISSING_ERROR,
@@ -33,14 +32,44 @@ from .constants import (
     VISION_ROW_CROP_BANDS,
 )
 
-DB_PATH = Path(__file__).parent / DB_FILENAME
-
-
 # ── DB helpers ────────────────────────────────────────────────────────────────
-def _conn() -> sqlite3.Connection:
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    return con
+
+class _Conn:
+    """Thin wrapper: psycopg2 connection that exposes sqlite3-style .execute()."""
+
+    def __init__(self):
+        self._con = psycopg2.connect(
+            get_settings().database_url,
+            cursor_factory=psycopg2.extras.DictCursor,
+        )
+
+    def execute(self, sql: str, params=()):
+        cur = self._con.cursor()
+        cur.execute(sql, params)
+        return cur
+
+    def commit(self):
+        self._con.commit()
+
+    def rollback(self):
+        self._con.rollback()
+
+    def close(self):
+        self._con.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, *_):
+        if exc_type:
+            self.rollback()
+        else:
+            self.commit()
+        self.close()
+
+
+def _conn() -> _Conn:
+    return _Conn()
 
 
 def _init_db() -> None:
@@ -59,7 +88,7 @@ def _init_db() -> None:
         """)
         con.execute("""
             CREATE TABLE IF NOT EXISTS matches (
-                id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                id   SERIAL PRIMARY KEY,
                 name TEXT NOT NULL
             )
         """)
@@ -71,33 +100,17 @@ def _init_db() -> None:
                 PRIMARY KEY (username, match_id)
             )
         """)
-        # Migrate existing INTEGER column to REAL if needed
-        col_info = con.execute("PRAGMA table_info(scores)").fetchall()
-        for col in col_info:
-            if col["name"] == "points" and col["type"].upper() == "INTEGER":
-                con.execute("ALTER TABLE scores RENAME TO scores_old")
-                con.execute("""
-                    CREATE TABLE scores (
-                        username TEXT    NOT NULL,
-                        match_id INTEGER NOT NULL REFERENCES matches(id),
-                        points   REAL    NOT NULL DEFAULT 0,
-                        PRIMARY KEY (username, match_id)
-                    )
-                """)
-                con.execute("INSERT INTO scores SELECT username, match_id, CAST(points AS REAL) FROM scores_old")
-                con.execute("DROP TABLE scores_old")
-                break
 
         # Seed default admin code if not set
         con.execute(
-            "INSERT OR IGNORE INTO settings (key, value) VALUES ('admin_code', ?)",
+            "INSERT INTO settings (key, value) VALUES ('admin_code', %s) ON CONFLICT DO NOTHING",
             (DEFAULT_ADMIN_CODE,),
         )
 
         # Seed fixed players
         for username, display_name in FIXED_PLAYERS:
             con.execute(
-                "INSERT OR IGNORE INTO players (username, display_name) VALUES (?,?)",
+                "INSERT INTO players (username, display_name) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                 (username, display_name),
             )
 
@@ -265,7 +278,7 @@ class ScoreKeeperService:
         if len(new_code) < 4:
             return False, "New code must be at least 4 characters."
         with _conn() as con:
-            con.execute("UPDATE settings SET value=? WHERE key='admin_code'", (new_code,))
+            con.execute("UPDATE settings SET value=%s WHERE key='admin_code'", (new_code,))
         return True, "Code successfully changed!"
 
     # ── Image extraction ────────────────────────────────────────────────────
@@ -338,13 +351,13 @@ class ScoreKeeperService:
         with _conn() as con:
             match_number = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM matches").fetchone()[0]
             match_name = f"Match {match_number}"
-            cur = con.execute("INSERT INTO matches (name) VALUES (?)", (match_name,))
-            match_id = cur.lastrowid
+            cur = con.execute("INSERT INTO matches (name) VALUES (%s) RETURNING id", (match_name,))
+            match_id = cur.fetchone()["id"]
             for ps in player_scores:
                 username = _canonical_username(ps["username"])
                 con.execute(
-                    "INSERT INTO scores (username, match_id, points) VALUES (?,?,?)"
-                    " ON CONFLICT(username, match_id) DO UPDATE SET points=excluded.points",
+                    "INSERT INTO scores (username, match_id, points) VALUES (%s, %s, %s)"
+                    " ON CONFLICT (username, match_id) DO UPDATE SET points=EXCLUDED.points",
                     (username, match_id, ps["points"]),
                 )
         return match_name, match_number
@@ -356,11 +369,11 @@ class ScoreKeeperService:
 
     def get_match(self, match_id: int) -> dict:
         with _conn() as con:
-            match = con.execute("SELECT id, name FROM matches WHERE id=?", (match_id,)).fetchone()
+            match = con.execute("SELECT id, name FROM matches WHERE id=%s", (match_id,)).fetchone()
             if match is None:
                 raise ValueError("Match not found.")
             scores = con.execute(
-                "SELECT username, points FROM scores WHERE match_id=?",
+                "SELECT username, points FROM scores WHERE match_id=%s",
                 (match_id,),
             ).fetchall()
 
@@ -384,25 +397,25 @@ class ScoreKeeperService:
 
     def update_match(self, match_id: int, player_scores: list[dict]) -> tuple[str, int]:
         with _conn() as con:
-            match = con.execute("SELECT name FROM matches WHERE id=?", (match_id,)).fetchone()
+            match = con.execute("SELECT name FROM matches WHERE id=%s", (match_id,)).fetchone()
             if match is None:
                 raise ValueError("Match not found.")
             for ps in player_scores:
                 username = _canonical_username(ps["username"])
                 con.execute(
-                    "INSERT INTO scores (username, match_id, points) VALUES (?,?,?) "
-                    "ON CONFLICT(username, match_id) DO UPDATE SET points=excluded.points",
+                    "INSERT INTO scores (username, match_id, points) VALUES (%s, %s, %s) "
+                    "ON CONFLICT (username, match_id) DO UPDATE SET points=EXCLUDED.points",
                     (username, match_id, ps["points"]),
                 )
         return match["name"], match_id
 
     def delete_match(self, match_id: int) -> str:
         with _conn() as con:
-            match = con.execute("SELECT name FROM matches WHERE id=?", (match_id,)).fetchone()
+            match = con.execute("SELECT name FROM matches WHERE id=%s", (match_id,)).fetchone()
             if match is None:
                 raise ValueError("Match not found.")
-            con.execute("DELETE FROM scores WHERE match_id=?", (match_id,))
-            con.execute("DELETE FROM matches WHERE id=?", (match_id,))
+            con.execute("DELETE FROM scores WHERE match_id=%s", (match_id,))
+            con.execute("DELETE FROM matches WHERE id=%s", (match_id,))
         return match["name"]
 
     def reset_data(self) -> None:
