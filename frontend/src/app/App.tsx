@@ -68,11 +68,11 @@ function Leaderboard({ data, onRefresh, loading }: {
             <thead>
               <tr className="border-b border-slate-700/50 bg-slate-800/60">
                 <th className="px-3 py-3 text-left text-slate-400 font-medium w-8">#</th>
-                <th className="px-3 py-3 text-left text-slate-400 font-medium">Player</th>
-                {data.match_headers.map(m => (
-                  <th key={m} className="px-3 py-3 text-center text-slate-400 font-medium whitespace-nowrap">{m}</th>
-                ))}
-                <th className="px-3 py-3 text-center text-white font-semibold">Total</th>
+<th className="px-3 py-3 text-left text-slate-400 font-medium">Player</th>
+<th className="px-3 py-3 text-center text-white font-semibold">Total</th>
+{data.match_headers.map(m => (
+  <th key={m} className="px-3 py-3 text-center text-slate-400 font-medium whitespace-nowrap">{m}</th>
+))}
               </tr>
             </thead>
             <tbody>
@@ -86,14 +86,14 @@ function Leaderboard({ data, onRefresh, loading }: {
                     <div className="font-medium text-white leading-tight">{p.display_name}</div>
                     <div className="text-xs text-slate-500">@{p.username}</div>
                   </td>
-                  {data.match_headers.map(m => (
-                    <td key={m} className="px-3 py-3 text-center text-slate-300">{p.matches[m] ?? 0}</td>
-                  ))}
                   <td className="px-3 py-3 text-center">
-                    <span className={`font-bold text-base ${p.rank === 1 ? 'text-yellow-400' : p.rank === 2 ? 'text-slate-200' : p.rank === 3 ? 'text-amber-500' : 'text-indigo-300'}`}>
-                      {p.total}
-                    </span>
-                  </td>
+  <span className={`font-bold text-base ${p.rank === 1 ? 'text-yellow-400' : p.rank === 2 ? 'text-slate-200' : p.rank === 3 ? 'text-amber-500' : 'text-indigo-300'}`}>
+    {p.total}
+  </span>
+</td>
+{data.match_headers.map(m => (
+  <td key={m} className="px-3 py-3 text-center text-slate-300">{p.matches[m] ?? 0}</td>
+))}
                 </motion.tr>
               ))}
             </tbody>
