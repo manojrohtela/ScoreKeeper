@@ -2,6 +2,15 @@ export const APP_TEXT = {
   tabs: {
     leaderboard: 'Leaderboard',
     upload: 'Upload Match',
+    analytics: 'Analytics',
+  },
+  analytics: {
+    title: 'Ranking Graphs',
+    playerFilter: 'Player Filter',
+    allPlayers: 'All Players',
+    matchRankTitle: 'Match-wise Rank (Per Match Points)',
+    cumulativeRankTitle: 'Cumulative Rank Progression',
+    empty: 'Upload at least one match to see ranking graphs.',
   },
   hero: {
     badge: 'Match Points Tracker',

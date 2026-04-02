@@ -4,7 +4,7 @@ import {
   Trophy, Upload, MessageSquare, RefreshCw, FileDown,
   CheckCircle2, AlertCircle, ImagePlus, Send,
   Medal, Crown, ChevronUp, ChevronDown, Loader2,
-  Lock, KeyRound, Eye, EyeOff, ShieldCheck, Pencil,
+  Lock, KeyRound, Eye, EyeOff, ShieldCheck, Pencil, LineChart as LineChartIcon,
   Trash2, RotateCcw, X,
 } from 'lucide-react';
 import {
@@ -100,6 +100,205 @@ function Leaderboard({ data, onRefresh, loading }: {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+type RankPoint = { match: string } & Record<string, number | string>;
+
+function rankMapForValues(items: { username: string; value: number }[]) {
+  const sorted = [...items].sort((a, b) => {
+    if (b.value !== a.value) return b.value - a.value;
+    return a.username.localeCompare(b.username);
+  });
+
+  const rankByUsername: Record<string, number> = {};
+  let currentRank = 0;
+  let previousValue: number | null = null;
+
+  sorted.forEach((item, index) => {
+    if (previousValue === null || item.value !== previousValue) currentRank = index + 1;
+    rankByUsername[item.username] = currentRank;
+    previousValue = item.value;
+  });
+
+  return rankByUsername;
+}
+
+function buildMatchWiseRankData(data: StandingsResponse): RankPoint[] {
+  return data.match_headers.map((match) => {
+    const rankByUsername = rankMapForValues(data.players.map((player) => ({
+      username: player.username,
+      value: player.matches[match] ?? 0,
+    })));
+    return data.players.reduce<RankPoint>((acc, player) => {
+      acc[player.username] = rankByUsername[player.username];
+      return acc;
+    }, { match });
+  });
+}
+
+function buildCumulativeRankData(data: StandingsResponse): RankPoint[] {
+  const cumulative: Record<string, number> = Object.fromEntries(data.players.map((player) => [player.username, 0]));
+
+  return data.match_headers.map((match) => {
+    data.players.forEach((player) => { cumulative[player.username] += player.matches[match] ?? 0; });
+    const rankByUsername = rankMapForValues(data.players.map((player) => ({
+      username: player.username,
+      value: cumulative[player.username],
+    })));
+    return data.players.reduce<RankPoint>((acc, player) => {
+      acc[player.username] = rankByUsername[player.username];
+      return acc;
+    }, { match });
+  });
+}
+
+function RankLineGraph({
+  graphData,
+  players,
+  maxRank,
+}: {
+  graphData: RankPoint[];
+  players: { username: string; name: string }[];
+  maxRank: number;
+}) {
+  const width = 860;
+  const height = 290;
+  const margin = { top: 16, right: 30, bottom: 46, left: 34 };
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
+  const xStep = graphData.length > 1 ? innerWidth / (graphData.length - 1) : 0;
+  const yForRank = (rank: number) => margin.top + ((rank - 1) / Math.max(maxRank - 1, 1)) * innerHeight;
+  const xForIndex = (index: number) => margin.left + (graphData.length === 1 ? innerWidth / 2 : index * xStep);
+  const palette = ['#818cf8', '#34d399', '#f59e0b', '#f472b6', '#38bdf8', '#c084fc', '#fb7185', '#facc15'];
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[640px]">
+        {Array.from({ length: maxRank }, (_, idx) => idx + 1).map((rank) => (
+          <g key={`grid-${rank}`}>
+            <line
+              x1={margin.left}
+              y1={yForRank(rank)}
+              x2={width - margin.right}
+              y2={yForRank(rank)}
+              stroke="#334155"
+              strokeDasharray="4 4"
+            />
+            <text x={margin.left - 10} y={yForRank(rank) + 4} fill="#94a3b8" fontSize="11" textAnchor="end">{rank}</text>
+          </g>
+        ))}
+
+        {graphData.map((point, index) => (
+          <text
+            key={`match-${point.match}`}
+            x={xForIndex(index)}
+            y={height - 16}
+            fill="#94a3b8"
+            fontSize="11"
+            textAnchor="middle"
+          >
+            {point.match as string}
+          </text>
+        ))}
+
+        {players.map((player, playerIndex) => {
+          const path = graphData.map((point, index) => {
+            const rank = Number(point[player.username] ?? maxRank);
+            return `${index === 0 ? 'M' : 'L'} ${xForIndex(index)} ${yForRank(rank)}`;
+          }).join(' ');
+
+          return (
+            <g key={player.username}>
+              <path d={path} fill="none" stroke={palette[playerIndex % palette.length]} strokeWidth="2.5" />
+              {graphData.map((point, index) => {
+                const rank = Number(point[player.username] ?? maxRank);
+                return (
+                  <circle
+                    key={`${player.username}-${point.match}`}
+                    cx={xForIndex(index)}
+                    cy={yForRank(rank)}
+                    r="3.5"
+                    fill={palette[playerIndex % palette.length]}
+                  >
+                    <title>{`${player.name} • ${point.match}: Rank ${rank}`}</title>
+                  </circle>
+                );
+              })}
+            </g>
+          );
+        })}
+      </svg>
+
+      <div className="flex flex-wrap gap-3 mt-3 text-xs">
+        {players.map((player, index) => (
+          <div key={`${player.username}-legend`} className="inline-flex items-center gap-1.5 text-slate-300">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: palette[index % palette.length] }} />
+            {player.name}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RankingAnalytics({ data }: { data: StandingsResponse | null }) {
+  const [selectedPlayer, setSelectedPlayer] = useState<'ALL' | string>('ALL');
+
+  useEffect(() => {
+    if (!data || data.players.length === 0) {
+      setSelectedPlayer('ALL');
+      return;
+    }
+    if (selectedPlayer !== 'ALL' && !data.players.some((player) => player.username === selectedPlayer)) {
+      setSelectedPlayer('ALL');
+    }
+  }, [data, selectedPlayer]);
+
+  if (!data || data.match_headers.length === 0 || data.players.length === 0) {
+    return <p className="text-slate-400 text-sm">{APP_TEXT.analytics.empty}</p>;
+  }
+
+  const playerMeta = data.players.map((player) => ({ username: player.username, name: player.display_name }));
+  const filteredPlayers = selectedPlayer === 'ALL' ? playerMeta : playerMeta.filter((player) => player.username === selectedPlayer);
+  const matchWiseRankData = buildMatchWiseRankData(data);
+  const cumulativeRankData = buildCumulativeRankData(data);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+        <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+          <LineChartIcon className="w-5 h-5 text-indigo-400" />
+          {APP_TEXT.analytics.title}
+        </h2>
+        <label className="text-sm text-slate-300 flex items-center gap-2">
+          <span>{APP_TEXT.analytics.playerFilter}</span>
+          <select
+            value={selectedPlayer}
+            onChange={(e) => setSelectedPlayer(e.target.value as 'ALL' | string)}
+            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500/60"
+          >
+            <option value="ALL">{APP_TEXT.analytics.allPlayers}</option>
+            {playerMeta.map((player) => (
+              <option key={player.username} value={player.username}>{player.name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {[{
+        title: APP_TEXT.analytics.matchRankTitle,
+        dataSource: matchWiseRankData,
+      }, {
+        title: APP_TEXT.analytics.cumulativeRankTitle,
+        dataSource: cumulativeRankData,
+      }].map((graph) => (
+        <div key={graph.title} className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-4">
+          <h3 className="text-sm font-medium text-slate-300 mb-4">{graph.title}</h3>
+          <RankLineGraph graphData={graph.dataSource} players={filteredPlayers} maxRank={data.players.length} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -840,7 +1039,7 @@ function ChatWidget({ open, onOpenChange, onUnlockAdmin }: {
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
-type Tab = 'leaderboard' | 'upload';
+type Tab = 'leaderboard' | 'upload' | 'analytics';
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('leaderboard');
@@ -861,6 +1060,7 @@ export default function App() {
   const tabs: { id: Tab; label: string; icon: ReactNode }[] = [
     { id: 'leaderboard', label: APP_TEXT.tabs.leaderboard, icon: <Trophy className="w-4 h-4" /> },
     { id: 'upload',      label: APP_TEXT.tabs.upload, icon: <Upload className="w-4 h-4" /> },
+    { id: 'analytics',   label: APP_TEXT.tabs.analytics, icon: <LineChartIcon className="w-4 h-4" /> },
   ];
 
   return (
@@ -924,6 +1124,7 @@ export default function App() {
           className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 md:p-8">
           {tab === 'leaderboard' && <Leaderboard data={standings} onRefresh={fetchStandings} loading={loadingStandings} />}
           {tab === 'upload' && <UploadMatch onSuccess={() => { fetchStandings(); setTimeout(() => setTab('leaderboard'), 1500); }} />}
+          {tab === 'analytics' && <RankingAnalytics data={standings} />}
         </motion.div>
 
         <p className="text-center text-slate-600 text-xs mt-8">Powered by Groq · SQLite · {APP_TEXT.hero.title}</p>
