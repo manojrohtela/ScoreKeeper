@@ -11,6 +11,12 @@ export const APP_TEXT = {
     matchRankTitle: 'Match-wise Rank (Per Match Points)',
     cumulativeRankTitle: 'Cumulative Rank Progression',
     empty: 'Upload at least one match to see ranking graphs.',
+    selectionHint: 'Select one or more players to compare how they move across matches.',
+    selectedCount: 'selected',
+    selectAll: 'Select all',
+    clearAll: 'Clear',
+    legendHint: 'Emoji badges make every line easy to spot.',
+    noPlayersSelected: 'Choose at least one player to show the graph.',
   },
   hero: {
     badge: 'Match Points Tracker',

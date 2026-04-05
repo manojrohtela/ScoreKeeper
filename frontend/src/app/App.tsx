@@ -4,7 +4,7 @@ import {
   Trophy, Upload, MessageSquare, RefreshCw, FileDown,
   CheckCircle2, AlertCircle, ImagePlus, Send,
   Medal, Crown, ChevronUp, ChevronDown, Loader2,
-  Lock, KeyRound, Eye, EyeOff, ShieldCheck, Pencil, LineChart as LineChartIcon,
+  Lock, KeyRound, Eye, EyeOff, ShieldCheck, Pencil, LineChart as LineChartIcon, Sparkles,
   Trash2, RotateCcw, X,
 } from 'lucide-react';
 import {
@@ -23,6 +23,21 @@ function rankBadge(rank: number) {
   if (rank === 2) return <Medal className="w-4 h-4 text-slate-300" />;
   if (rank === 3) return <Medal className="w-4 h-4 text-amber-500" />;
   return <span className="text-slate-500 text-sm w-4 text-center">{rank}</span>;
+}
+
+const PLAYER_EMOJIS = ['🎮', '🦊', '🐸', '🤖', '🦄', '🐙', '⚡', '🥷'];
+const GRAPH_PALETTE = ['#818cf8', '#34d399', '#f59e0b', '#f472b6', '#38bdf8', '#c084fc', '#fb7185', '#facc15'];
+
+function hashString(value: string) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+function playerEmoji(username: string) {
+  return PLAYER_EMOJIS[hashString(username) % PLAYER_EMOJIS.length];
 }
 
 // ─── Leaderboard ─────────────────────────────────────────────────────────────
@@ -171,20 +186,46 @@ function RankLineGraph({
   const xStep = graphData.length > 1 ? innerWidth / (graphData.length - 1) : 0;
   const yForRank = (rank: number) => margin.top + ((rank - 1) / Math.max(maxRank - 1, 1)) * innerHeight;
   const xForIndex = (index: number) => margin.left + (graphData.length === 1 ? innerWidth / 2 : index * xStep);
-  const palette = ['#818cf8', '#34d399', '#f59e0b', '#f472b6', '#38bdf8', '#c084fc', '#fb7185', '#facc15'];
 
   return (
-    <div className="w-full overflow-x-auto">
+    <div className="w-full overflow-x-auto rounded-2xl border border-slate-800/60 bg-slate-950/30 p-3">
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[640px]">
+        <defs>
+          {players.map((player, playerIndex) => {
+            const color = GRAPH_PALETTE[playerIndex % GRAPH_PALETTE.length];
+            return (
+              <linearGradient id={`line-${player.username}`} key={player.username} x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor={color} stopOpacity="0.45" />
+                <stop offset="50%" stopColor={color} stopOpacity="1" />
+                <stop offset="100%" stopColor={color} stopOpacity="0.65" />
+              </linearGradient>
+            );
+          })}
+          <filter id="graphGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="2.6" result="blur" />
+            <feColorMatrix
+              in="blur"
+              type="matrix"
+              values="1 0 0 0 0
+                      0 1 0 0 0
+                      0 0 1 0 0
+                      0 0 0 10 -3"
+            />
+          </filter>
+        </defs>
+
         {Array.from({ length: maxRank }, (_, idx) => idx + 1).map((rank) => (
           <g key={`grid-${rank}`}>
-            <line
+            <motion.line
               x1={margin.left}
               y1={yForRank(rank)}
               x2={width - margin.right}
               y2={yForRank(rank)}
               stroke="#334155"
               strokeDasharray="4 4"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.35, delay: rank * 0.02 }}
             />
             <text x={margin.left - 10} y={yForRank(rank) + 4} fill="#94a3b8" fontSize="11" textAnchor="end">{rank}</text>
           </g>
@@ -208,22 +249,39 @@ function RankLineGraph({
             const rank = Number(point[player.username] ?? maxRank);
             return `${index === 0 ? 'M' : 'L'} ${xForIndex(index)} ${yForRank(rank)}`;
           }).join(' ');
+          const color = GRAPH_PALETTE[playerIndex % GRAPH_PALETTE.length];
 
           return (
             <g key={player.username}>
-              <path d={path} fill="none" stroke={palette[playerIndex % palette.length]} strokeWidth="2.5" />
+              <motion.path
+                d={path}
+                fill="none"
+                stroke={`url(#line-${player.username})`}
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                filter="url(#graphGlow)"
+                initial={{ pathLength: 0, opacity: 0.4 }}
+                animate={{ pathLength: 1, opacity: 1 }}
+                transition={{ duration: 1.05, ease: 'easeOut', delay: playerIndex * 0.12 }}
+              />
               {graphData.map((point, index) => {
                 const rank = Number(point[player.username] ?? maxRank);
                 return (
-                  <circle
+                  <motion.circle
                     key={`${player.username}-${point.match}`}
                     cx={xForIndex(index)}
                     cy={yForRank(rank)}
-                    r="3.5"
-                    fill={palette[playerIndex % palette.length]}
+                    r="4"
+                    fill="#0f172a"
+                    stroke={color}
+                    strokeWidth="2"
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.32, delay: 0.14 + playerIndex * 0.08 + index * 0.04 }}
                   >
                     <title>{`${player.name} • ${point.match}: Rank ${rank}`}</title>
-                  </circle>
+                  </motion.circle>
                 );
               })}
             </g>
@@ -231,12 +289,23 @@ function RankLineGraph({
         })}
       </svg>
 
-      <div className="flex flex-wrap gap-3 mt-3 text-xs">
+      <div className="flex flex-wrap gap-3 mt-4 text-xs">
         {players.map((player, index) => (
-          <div key={`${player.username}-legend`} className="inline-flex items-center gap-1.5 text-slate-300">
-            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: palette[index % palette.length] }} />
-            {player.name}
-          </div>
+          <motion.div
+            key={`${player.username}-legend`}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 + index * 0.06 }}
+            className="inline-flex items-center gap-2 rounded-full border border-slate-700/60 bg-slate-900/80 px-2.5 py-1 text-slate-300"
+          >
+            <span
+              className="flex h-6 w-6 items-center justify-center rounded-full text-[11px]"
+              style={{ backgroundColor: `${GRAPH_PALETTE[index % GRAPH_PALETTE.length]}22` }}
+            >
+              {playerEmoji(player.username)}
+            </span>
+            <span className="max-w-[11rem] truncate">{player.name}</span>
+          </motion.div>
         ))}
       </div>
     </div>
@@ -244,61 +313,155 @@ function RankLineGraph({
 }
 
 function RankingAnalytics({ data }: { data: StandingsResponse | null }) {
-  const [selectedPlayer, setSelectedPlayer] = useState<'ALL' | string>('ALL');
+  const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
 
   useEffect(() => {
     if (!data || data.players.length === 0) {
-      setSelectedPlayer('ALL');
+      setSelectedPlayers([]);
       return;
     }
-    if (selectedPlayer !== 'ALL' && !data.players.some((player) => player.username === selectedPlayer)) {
-      setSelectedPlayer('ALL');
-    }
-  }, [data, selectedPlayer]);
+    setSelectedPlayers((current) => {
+      const next = current.filter((username) => data.players.some((player) => player.username === username));
+      return next.length > 0 ? next : data.players.map((player) => player.username);
+    });
+  }, [data]);
 
   if (!data || data.match_headers.length === 0 || data.players.length === 0) {
     return <p className="text-slate-400 text-sm">{APP_TEXT.analytics.empty}</p>;
   }
 
   const playerMeta = data.players.map((player) => ({ username: player.username, name: player.display_name }));
-  const filteredPlayers = selectedPlayer === 'ALL' ? playerMeta : playerMeta.filter((player) => player.username === selectedPlayer);
+  const filteredPlayers = playerMeta.filter((player) => selectedPlayers.includes(player.username));
   const matchWiseRankData = buildMatchWiseRankData(data);
   const cumulativeRankData = buildCumulativeRankData(data);
+  const selectedCount = filteredPlayers.length;
+  const togglePlayer = (username: string) => {
+    setSelectedPlayers((current) => (
+      current.includes(username)
+        ? current.filter((player) => player !== username)
+        : [...current, username]
+    ));
+  };
+  const selectAll = () => setSelectedPlayers(playerMeta.map((player) => player.username));
+  const clearAll = () => setSelectedPlayers([]);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-        <h2 className="text-xl font-semibold text-white flex items-center gap-2">
-          <LineChartIcon className="w-5 h-5 text-indigo-400" />
-          {APP_TEXT.analytics.title}
-        </h2>
-        <label className="text-sm text-slate-300 flex items-center gap-2">
-          <span>{APP_TEXT.analytics.playerFilter}</span>
-          <select
-            value={selectedPlayer}
-            onChange={(e) => setSelectedPlayer(e.target.value as 'ALL' | string)}
-            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500/60"
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+            <LineChartIcon className="w-5 h-5 text-indigo-400" />
+            {APP_TEXT.analytics.title}
+          </h2>
+          <p className="text-sm text-slate-400">{APP_TEXT.analytics.selectionHint}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-200">
+            <Sparkles className="w-3.5 h-3.5" />
+            {selectedCount} {APP_TEXT.analytics.selectedCount}
+          </span>
+          <button
+            onClick={selectAll}
+            className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
           >
-            <option value="ALL">{APP_TEXT.analytics.allPlayers}</option>
-            {playerMeta.map((player) => (
-              <option key={player.username} value={player.username}>{player.name}</option>
-            ))}
-          </select>
-        </label>
+            {APP_TEXT.analytics.selectAll}
+          </button>
+          <button
+            onClick={clearAll}
+            className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-rose-500/40 hover:text-white"
+          >
+            {APP_TEXT.analytics.clearAll}
+          </button>
+        </div>
       </div>
 
-      {[{
-        title: APP_TEXT.analytics.matchRankTitle,
-        dataSource: matchWiseRankData,
-      }, {
-        title: APP_TEXT.analytics.cumulativeRankTitle,
-        dataSource: cumulativeRankData,
-      }].map((graph) => (
-        <div key={graph.title} className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-4">
-          <h3 className="text-sm font-medium text-slate-300 mb-4">{graph.title}</h3>
-          <RankLineGraph graphData={graph.dataSource} players={filteredPlayers} maxRank={data.players.length} />
-        </div>
-      ))}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {playerMeta.map((player, index) => {
+          const checked = selectedPlayers.includes(player.username);
+          return (
+            <motion.label
+              key={player.username}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.04 }}
+              whileHover={{ y: -2 }}
+              className={`flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 transition-all ${
+                checked
+                  ? 'border-indigo-400/40 bg-indigo-500/10 shadow-lg shadow-indigo-500/10'
+                  : 'border-slate-700/60 bg-slate-900/40 hover:border-slate-500/70'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => togglePlayer(player.username)}
+                className="sr-only"
+                aria-label={`Toggle ${player.name}`}
+              />
+              <span
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-lg transition-transform ${
+                  checked ? 'scale-105 bg-gradient-to-br from-indigo-400 to-fuchsia-400' : 'bg-slate-800'
+                }`}
+              >
+                {playerEmoji(player.username)}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium text-white">{player.name}</span>
+                <span className="block truncate text-xs text-slate-500">@{player.username}</span>
+              </span>
+              <span
+                className={`flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
+                  checked ? 'border-emerald-400 bg-emerald-400 text-slate-950' : 'border-slate-600 text-transparent'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+              </span>
+            </motion.label>
+          );
+        })}
+      </div>
+
+      <AnimatePresence mode="wait">
+        {filteredPlayers.length > 0 ? (
+          <motion.div key="graphs" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} className="space-y-4">
+            {[{
+              title: APP_TEXT.analytics.matchRankTitle,
+              dataSource: matchWiseRankData,
+            }, {
+              title: APP_TEXT.analytics.cumulativeRankTitle,
+              dataSource: cumulativeRankData,
+            }].map((graph, index) => (
+              <motion.div
+                key={graph.title}
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.08 }}
+                className="rounded-2xl border border-slate-700/50 bg-slate-900/45 p-4"
+              >
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-medium text-slate-200">{graph.title}</h3>
+                    <p className="text-xs text-slate-500">{selectedCount} players active</p>
+                  </div>
+                  <span className="rounded-full border border-slate-700/60 bg-slate-950/40 px-3 py-1 text-xs text-slate-400">
+                    {APP_TEXT.analytics.legendHint}
+                  </span>
+                </div>
+                <RankLineGraph graphData={graph.dataSource} players={filteredPlayers} maxRank={data.players.length} />
+              </motion.div>
+            ))}
+          </motion.div>
+        ) : (
+          <motion.div
+            key="empty"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="rounded-2xl border border-dashed border-slate-700/60 bg-slate-950/30 px-6 py-10 text-center text-slate-400"
+          >
+            {APP_TEXT.analytics.noPlayersSelected}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
