@@ -195,9 +195,9 @@ function RankLineGraph({
             const color = GRAPH_PALETTE[playerIndex % GRAPH_PALETTE.length];
             return (
               <linearGradient id={`line-${player.username}`} key={player.username} x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor={color} stopOpacity="0.45" />
+                <stop offset="0%" stopColor={color} stopOpacity="1" />
                 <stop offset="50%" stopColor={color} stopOpacity="1" />
-                <stop offset="100%" stopColor={color} stopOpacity="0.65" />
+                <stop offset="100%" stopColor={color} stopOpacity="1" />
               </linearGradient>
             );
           })}
@@ -257,11 +257,11 @@ function RankLineGraph({
                 d={path}
                 fill="none"
                 stroke={`url(#line-${player.username})`}
-                strokeWidth="3"
+                strokeWidth="3.25"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 filter="url(#graphGlow)"
-                initial={{ pathLength: 0, opacity: 0.4 }}
+                initial={{ pathLength: 0, opacity: 0.8 }}
                 animate={{ pathLength: 1, opacity: 1 }}
                 transition={{ duration: 1.05, ease: 'easeOut', delay: playerIndex * 0.12 }}
               />
