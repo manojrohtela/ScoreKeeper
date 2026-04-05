@@ -676,124 +676,150 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {data.players.map((player, index) => {
-          const playerForecast = forecastByUsername[player.username];
-          const delta = deltas[player.username] ?? 0;
-          const playerIndex = forecastPlayers.findIndex((item) => item.username === player.username);
-          const overtakeTarget = playerIndex > 0 ? forecastPlayers[playerIndex - 1] : null;
-          const pointsToOvertake = overtakeTarget
-            ? Math.max(1, Math.ceil(overtakeTarget.projectedTotal - playerForecast.projectedTotal + 1))
-            : 0;
+      <div className="rounded-2xl border border-slate-700/50 bg-slate-900/45 overflow-hidden">
+        <div className="border-b border-slate-700/50 bg-slate-800/60 px-4 py-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h3 className="text-sm font-medium text-slate-200">{APP_TEXT.simulator.title}</h3>
+              <p className="text-xs text-slate-500">{APP_TEXT.simulator.sliderHint}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setAll(5)}
+                className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+              >
+                {APP_TEXT.simulator.presetBoost}
+              </button>
+              <button
+                onClick={() => setAll(10)}
+                className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+              >
+                {APP_TEXT.simulator.presetBig}
+              </button>
+              <button
+                onClick={() => setAll(15)}
+                className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+              >
+                {APP_TEXT.simulator.presetHuge}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="divide-y divide-slate-800/50">
+          {forecastPlayers.map((player, index) => {
+            const delta = deltas[player.username] ?? 0;
+            const overtakeTarget = index > 0 ? forecastPlayers[index - 1] : null;
+            const pointsToOvertake = overtakeTarget
+              ? Math.max(1, Math.ceil(overtakeTarget.projectedTotal - player.projectedTotal + 1))
+              : 0;
 
-          return (
-            <motion.div
-              key={player.username}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.04 }}
-              className={`rounded-2xl border p-4 transition-colors ${
-                delta === 0 ? 'border-slate-700/50 bg-slate-900/45' : 'border-indigo-400/30 bg-indigo-500/10'
-              }`}
-            >
-              <div className="flex items-start justify-between gap-3">
+            return (
+              <motion.div
+                key={player.username}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.04 }}
+                className={`grid gap-4 px-4 py-4 lg:grid-cols-[260px_minmax(0,1fr)_160px] lg:items-center ${
+                  delta === 0 ? 'bg-transparent' : 'bg-indigo-500/5'
+                }`}
+              >
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-800 text-lg">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-800 text-lg">
                     {playerEmoji(player.username)}
-                  </span>
+                  </div>
                   <div className="min-w-0">
-                    <div className="truncate font-medium text-white">{player.display_name}</div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="flex-shrink-0">{rankBadge(player.projectedRank)}</span>
+                      <div className="truncate font-medium text-white">{player.display_name}</div>
+                    </div>
                     <div className="text-xs text-slate-500">@{player.username}</div>
                     <div className="mt-1 text-xs text-slate-400">
                       {APP_TEXT.simulator.actualRank} #{player.rank} · {player.total} pts
                     </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-xs text-slate-500">{APP_TEXT.simulator.projectedRank}</div>
-                  <div className="text-lg font-semibold text-white">#{playerForecast.projectedRank}</div>
-                  <div className={`mt-1 inline-flex items-center gap-1 text-xs font-medium ${
-                    playerForecast.rankDelta > 0
-                      ? 'text-emerald-400'
-                      : playerForecast.rankDelta < 0
-                        ? 'text-rose-400'
-                        : 'text-slate-400'
-                  }`}>
-                    {playerForecast.rankDelta > 0 && <ArrowUpRight className="w-3.5 h-3.5" />}
-                    {playerForecast.rankDelta < 0 && <ArrowDownRight className="w-3.5 h-3.5" />}
-                    {playerForecast.rankDelta === 0 ? 'No move' : `${playerForecast.rankDelta > 0 ? '+' : ''}${playerForecast.rankDelta}`}
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span>{APP_TEXT.simulator.delta}: {formatDelta(delta)} pts</span>
+                    <span>{APP_TEXT.simulator.projectedTotal}: {player.projectedTotal} pts</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={-SIMULATION_RANGE}
+                    max={SIMULATION_RANGE}
+                    step={1}
+                    value={delta}
+                    onChange={e => {
+                      const next = Number(e.target.value);
+                      setDeltas(current => ({ ...current, [player.username]: next }));
+                    }}
+                    className="w-full accent-indigo-400"
+                  />
+                  <div className="flex items-center justify-between text-[11px] text-slate-500">
+                    <span>-{SIMULATION_RANGE}</span>
+                    <span>0</span>
+                    <span>+{SIMULATION_RANGE}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPreset(player.username, 5)}
+                      className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+                    >
+                      +5
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreset(player.username, 10)}
+                      className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+                    >
+                      +10
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreset(player.username, 15)}
+                      className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+                    >
+                      +15
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreset(player.username, 0)}
+                      className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-rose-500/40 hover:text-white"
+                    >
+                      Reset
+                    </button>
                   </div>
                 </div>
-              </div>
 
-              <div className="mt-4 space-y-3">
-                <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span>{APP_TEXT.simulator.delta}: {formatDelta(delta)} pts</span>
-                  <span>{APP_TEXT.simulator.projectedTotal}: {playerForecast.projectedTotal} pts</span>
-                </div>
-                <input
-                  type="range"
-                  min={-SIMULATION_RANGE}
-                  max={SIMULATION_RANGE}
-                  step={1}
-                  value={delta}
-                  onChange={e => {
-                    const next = Number(e.target.value);
-                    setDeltas(current => ({ ...current, [player.username]: next }));
-                  }}
-                  className="w-full accent-indigo-400"
-                />
-                <div className="flex items-center justify-between text-[11px] text-slate-500">
-                  <span>-{SIMULATION_RANGE}</span>
-                  <span>0</span>
-                  <span>+{SIMULATION_RANGE}</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPreset(player.username, 5)}
-                    className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
-                  >
-                    +5
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreset(player.username, 10)}
-                    className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
-                  >
-                    +10
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreset(player.username, 15)}
-                    className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
-                  >
-                    +15
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreset(player.username, 0)}
-                    className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-rose-500/40 hover:text-white"
-                  >
-                    Reset
-                  </button>
-                </div>
                 <div className="rounded-xl border border-slate-700/50 bg-slate-950/35 px-3 py-2 text-[11px] text-slate-300">
-                  {overtakeTarget ? (
-                    <>
-                      {APP_TEXT.simulator.overtake} <span className="text-white font-medium">{overtakeTarget.display_name}</span>
-                      {' '}need {pointsToOvertake} more pts.
-                    </>
-                  ) : (
-                    <>
-                      {APP_TEXT.simulator.holding} <span className="text-white font-medium">#1</span>
-                    </>
-                  )}
+                  <div className={`inline-flex items-center gap-1 text-xs font-medium ${
+                    player.rankDelta > 0 ? 'text-emerald-400' : player.rankDelta < 0 ? 'text-rose-400' : 'text-slate-400'
+                  }`}>
+                    {player.rankDelta > 0 && <ArrowUpRight className="w-3.5 h-3.5" />}
+                    {player.rankDelta < 0 && <ArrowDownRight className="w-3.5 h-3.5" />}
+                    {player.rankDelta === 0 ? APP_TEXT.simulator.holding : `${player.rankDelta > 0 ? '+' : ''}${player.rankDelta} ${APP_TEXT.simulator.projectedRank.toLowerCase()}`}
+                  </div>
+                  <div className="mt-2">
+                    {overtakeTarget ? (
+                      <>
+                        {APP_TEXT.simulator.overtake} <span className="text-white font-medium">{overtakeTarget.display_name}</span>
+                        <span className="block mt-1 text-slate-400">
+                          Need {pointsToOvertake} more pts.
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        {APP_TEXT.simulator.holding} <span className="text-white font-medium">#1</span>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </motion.div>
-          );
-        })}
+              </motion.div>
+            );
+          })}
+        </div>
       </div>
 
       <ProjectedTotalsChart players={forecastPlayers} />
