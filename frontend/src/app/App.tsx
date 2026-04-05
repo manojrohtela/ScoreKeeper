@@ -328,7 +328,45 @@ function RankLineGraph({
   const matchPoints = Object.fromEntries(standings.players.map((player) => [player.username, player.matches]));
   const latestIndex = Math.max(graphData.length - 1, 0);
   const labelOffsetX = 18;
-  const labelOffsetY = 0;
+  const labelSize = 34;
+  const labelGap = 38;
+  const labelMinY = margin.top + 10;
+  const labelMaxY = height - margin.bottom - 10;
+  type EndLabel = {
+    player: { username: string; name: string };
+    avatar: PlayerAvatar;
+    rank: number;
+    rawY: number;
+    adjustedY?: number;
+  };
+  const endLabels = players
+    .map((player) => {
+      const latestPoint = graphData[latestIndex];
+      const rank = Number(latestPoint?.[player.username] ?? maxRank);
+      const rawY = yForRank(rank);
+      return {
+        player,
+        avatar: getPlayerAvatar(player.username, avatarRegistry),
+        rank,
+        rawY,
+      } satisfies EndLabel;
+    })
+    .sort((a, b) => a.rawY - b.rawY)
+    .map((item, index, list) => {
+      const previous = index > 0 ? list[index - 1] : null;
+      let adjustedY = previous ? Math.max(item.rawY, previous.adjustedY + labelGap) : item.rawY;
+      if (index === list.length - 1 && adjustedY > labelMaxY) {
+        const overflow = adjustedY - labelMaxY;
+        adjustedY -= overflow;
+      }
+      if (index === 0 && adjustedY < labelMinY) {
+        adjustedY = labelMinY;
+      }
+      return {
+        ...item,
+        adjustedY: Math.min(Math.max(adjustedY, labelMinY), labelMaxY),
+      };
+    });
 
   return (
     <div className="relative w-full overflow-x-auto rounded-2xl border border-slate-800/60 bg-slate-950/30 p-3">
@@ -451,18 +489,16 @@ function RankLineGraph({
 
       {graphData.length > 0 && (
         <div className="pointer-events-none absolute inset-3">
-          {players.map((player, index) => {
-            const avatar = getPlayerAvatar(player.username, avatarRegistry);
-            const latestPoint = graphData[latestIndex];
-            const rank = Number(latestPoint?.[player.username] ?? maxRank);
-            const y = yForRank(rank);
+          {endLabels.map(({ player, avatar, rank, adjustedY }, index) => {
             const left = ((xForIndex(latestIndex) + labelOffsetX) / width) * 100;
-            const top = ((y + labelOffsetY) / height) * 100;
+            const top = ((adjustedY ?? yForRank(rank)) / height) * 100;
             return (
               <div
                 key={`end-label-${player.username}`}
-                className="absolute flex h-9 w-9 items-center justify-center rounded-full border bg-slate-950/95 text-[18px] shadow-lg shadow-black/25"
+                className="absolute flex items-center justify-center rounded-full border bg-slate-950/95 shadow-lg shadow-black/25"
                 style={{
+                  width: `${labelSize}px`,
+                  height: `${labelSize}px`,
                   left: `${left}%`,
                   top: `${top}%`,
                   transform: 'translateY(-50%)',
