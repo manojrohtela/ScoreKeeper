@@ -5,6 +5,7 @@ import {
   CheckCircle2, AlertCircle, ImagePlus, Send,
   Medal, Crown, ChevronUp, ChevronDown, Loader2,
   Lock, KeyRound, Eye, EyeOff, ShieldCheck, Pencil, LineChart as LineChartIcon, Sparkles,
+  SlidersHorizontal, ArrowUpRight, ArrowDownRight,
   Trash2, RotateCcw, X,
 } from 'lucide-react';
 import {
@@ -38,6 +39,102 @@ function hashString(value: string) {
 
 function playerEmoji(username: string) {
   return PLAYER_EMOJIS[hashString(username) % PLAYER_EMOJIS.length];
+}
+
+const SIMULATION_RANGE = 30;
+
+type ForecastPlayer = StandingsResponse['players'][number] & {
+  delta: number;
+  projectedTotal: number;
+  projectedRank: number;
+  rankDelta: number;
+};
+
+function formatDelta(delta: number) {
+  return delta > 0 ? `+${delta}` : `${delta}`;
+}
+
+function buildForecastPlayers(players: StandingsResponse['players'], deltas: Record<string, number>): ForecastPlayer[] {
+  const projectedTotals = players.map((player) => ({
+    ...player,
+    delta: deltas[player.username] ?? 0,
+    projectedTotal: player.total + (deltas[player.username] ?? 0),
+  }));
+
+  const sorted = [...projectedTotals].sort((a, b) => {
+    if (b.projectedTotal !== a.projectedTotal) return b.projectedTotal - a.projectedTotal;
+    if (a.total !== b.total) return b.total - a.total;
+    return a.username.localeCompare(b.username);
+  });
+
+  const projectedRankByUsername: Record<string, number> = {};
+  let currentRank = 0;
+  let previousValue: number | null = null;
+
+  sorted.forEach((player, index) => {
+    if (previousValue === null || player.projectedTotal !== previousValue) currentRank = index + 1;
+    projectedRankByUsername[player.username] = currentRank;
+    previousValue = player.projectedTotal;
+  });
+
+  return projectedTotals
+    .map((player) => {
+      const projectedRank = projectedRankByUsername[player.username];
+      return {
+        ...player,
+        projectedRank,
+        rankDelta: player.rank - projectedRank,
+      };
+    })
+    .sort((a, b) => a.projectedRank - b.projectedRank || a.rank - b.rank);
+}
+
+function ProjectedTotalsChart({ players }: { players: ForecastPlayer[] }) {
+  const maxTotal = Math.max(...players.map((player) => player.projectedTotal), 1);
+
+  return (
+    <div className="rounded-2xl border border-slate-700/50 bg-slate-900/45 overflow-hidden">
+      <div className="border-b border-slate-700/50 bg-slate-800/60 px-4 py-3">
+        <h3 className="text-sm font-medium text-slate-200">{APP_TEXT.simulator.chartTitle}</h3>
+        <p className="text-xs text-slate-500">A quick visual read of who is ahead right now.</p>
+      </div>
+      <div className="space-y-2 px-4 py-4">
+        {players.map((player, index) => {
+          const barWidth = `${Math.max((player.projectedTotal / maxTotal) * 100, 8)}%`;
+          return (
+            <motion.div
+              key={player.username}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: index * 0.04 }}
+              className="grid grid-cols-[minmax(0,1fr)_110px] items-center gap-3"
+            >
+              <div className="min-w-0">
+                <div className="flex items-center justify-between gap-2 text-xs text-slate-300 mb-1">
+                  <span className="truncate">{player.display_name}</span>
+                  <span className={`font-medium ${player.delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {formatDelta(player.delta)}
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: barWidth }}
+                    transition={{ duration: 0.45, delay: 0.05 + index * 0.04 }}
+                    className="h-full rounded-full bg-gradient-to-r from-indigo-400 via-cyan-400 to-emerald-400"
+                  />
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-semibold text-white">{player.projectedTotal}</div>
+                <div className="text-[11px] text-slate-500">#{player.projectedRank}</div>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // ─── Leaderboard ─────────────────────────────────────────────────────────────
@@ -462,6 +559,286 @@ function RankingAnalytics({ data }: { data: StandingsResponse | null }) {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
+  const [deltas, setDeltas] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!data || data.players.length === 0) {
+      setDeltas({});
+      return;
+    }
+
+    setDeltas((current) => {
+      const next: Record<string, number> = {};
+      data.players.forEach((player) => {
+        next[player.username] = current[player.username] ?? 0;
+      });
+      return next;
+    });
+  }, [data]);
+
+  if (!data || data.players.length === 0) {
+    return <p className="text-slate-400 text-sm">{APP_TEXT.analytics.empty}</p>;
+  }
+
+  const forecastPlayers = buildForecastPlayers(data.players, deltas);
+  const forecastByUsername = Object.fromEntries(forecastPlayers.map((player) => [player.username, player]));
+  const projectedLeader = forecastPlayers[0];
+  const biggestMover = [...forecastPlayers].sort((a, b) => {
+    const rankMove = Math.abs(b.rankDelta) - Math.abs(a.rankDelta);
+    if (rankMove !== 0) return rankMove;
+    return Math.abs(b.delta) - Math.abs(a.delta);
+  })[0];
+
+  const setPreset = (username: string, value: number) => {
+    setDeltas((current) => ({ ...current, [username]: value }));
+  };
+
+  const setAll = (value: number) => {
+    setDeltas(Object.fromEntries(data.players.map((player) => [player.username, value])));
+  };
+
+  const resetSimulation = () => {
+    const next: Record<string, number> = {};
+    data.players.forEach((player) => {
+      next[player.username] = 0;
+    });
+    setDeltas(next);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+            <SlidersHorizontal className="w-5 h-5 text-indigo-400" />
+            {APP_TEXT.simulator.title}
+          </h2>
+          <p className="text-sm text-slate-400">{APP_TEXT.simulator.description}</p>
+        </div>
+        <button
+          onClick={resetSimulation}
+          className="inline-flex items-center gap-2 rounded-full border border-slate-700/60 bg-slate-900/60 px-4 py-2 text-sm text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+        >
+          <RotateCcw className="w-4 h-4" />
+          {APP_TEXT.simulator.reset}
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setAll(5)}
+          className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+        >
+          {APP_TEXT.simulator.presetBoost}
+        </button>
+        <button
+          onClick={() => setAll(10)}
+          className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+        >
+          {APP_TEXT.simulator.presetBig}
+        </button>
+        <button
+          onClick={() => setAll(15)}
+          className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+        >
+          {APP_TEXT.simulator.presetHuge}
+        </button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4">
+          <p className="text-xs uppercase tracking-wide text-indigo-200/80">{APP_TEXT.simulator.leader}</p>
+          <div className="mt-2 text-lg font-semibold text-white">
+            {projectedLeader ? `${playerEmoji(projectedLeader.username)} ${projectedLeader.display_name}` : '—'}
+          </div>
+          <p className="text-sm text-indigo-100/80 mt-1">Rank #{projectedLeader?.projectedRank ?? '—'} · {projectedLeader ? projectedLeader.projectedTotal : '—'} pts</p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-700/50 bg-slate-900/45 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-400">{APP_TEXT.simulator.biggestMover}</p>
+          <div className="mt-2 text-lg font-semibold text-white">
+            {biggestMover ? `${playerEmoji(biggestMover.username)} ${biggestMover.display_name}` : '—'}
+          </div>
+          <p className="text-sm text-slate-300 mt-1">
+            {biggestMover ? `${biggestMover.rankDelta > 0 ? '+' : ''}${biggestMover.rankDelta} rank change` : '—'}
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-700/50 bg-slate-900/45 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-400">{APP_TEXT.simulator.note}</p>
+          <div className="mt-2 text-lg font-semibold text-white">8 fixed players</div>
+          <p className="text-sm text-slate-300 mt-1">{APP_TEXT.simulator.sliderHint}</p>
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {data.players.map((player, index) => {
+          const playerForecast = forecastByUsername[player.username];
+          const delta = deltas[player.username] ?? 0;
+          const playerIndex = forecastPlayers.findIndex((item) => item.username === player.username);
+          const overtakeTarget = playerIndex > 0 ? forecastPlayers[playerIndex - 1] : null;
+          const pointsToOvertake = overtakeTarget
+            ? Math.max(1, Math.ceil(overtakeTarget.projectedTotal - playerForecast.projectedTotal + 1))
+            : 0;
+
+          return (
+            <motion.div
+              key={player.username}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.04 }}
+              className={`rounded-2xl border p-4 transition-colors ${
+                delta === 0 ? 'border-slate-700/50 bg-slate-900/45' : 'border-indigo-400/30 bg-indigo-500/10'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-800 text-lg">
+                    {playerEmoji(player.username)}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="truncate font-medium text-white">{player.display_name}</div>
+                    <div className="text-xs text-slate-500">@{player.username}</div>
+                    <div className="mt-1 text-xs text-slate-400">
+                      {APP_TEXT.simulator.actualRank} #{player.rank} · {player.total} pts
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-slate-500">{APP_TEXT.simulator.projectedRank}</div>
+                  <div className="text-lg font-semibold text-white">#{playerForecast.projectedRank}</div>
+                  <div className={`mt-1 inline-flex items-center gap-1 text-xs font-medium ${
+                    playerForecast.rankDelta > 0
+                      ? 'text-emerald-400'
+                      : playerForecast.rankDelta < 0
+                        ? 'text-rose-400'
+                        : 'text-slate-400'
+                  }`}>
+                    {playerForecast.rankDelta > 0 && <ArrowUpRight className="w-3.5 h-3.5" />}
+                    {playerForecast.rankDelta < 0 && <ArrowDownRight className="w-3.5 h-3.5" />}
+                    {playerForecast.rankDelta === 0 ? 'No move' : `${playerForecast.rankDelta > 0 ? '+' : ''}${playerForecast.rankDelta}`}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <div className="flex items-center justify-between text-xs text-slate-400">
+                  <span>{APP_TEXT.simulator.delta}: {formatDelta(delta)} pts</span>
+                  <span>{APP_TEXT.simulator.projectedTotal}: {playerForecast.projectedTotal} pts</span>
+                </div>
+                <input
+                  type="range"
+                  min={-SIMULATION_RANGE}
+                  max={SIMULATION_RANGE}
+                  step={1}
+                  value={delta}
+                  onChange={e => {
+                    const next = Number(e.target.value);
+                    setDeltas(current => ({ ...current, [player.username]: next }));
+                  }}
+                  className="w-full accent-indigo-400"
+                />
+                <div className="flex items-center justify-between text-[11px] text-slate-500">
+                  <span>-{SIMULATION_RANGE}</span>
+                  <span>0</span>
+                  <span>+{SIMULATION_RANGE}</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPreset(player.username, 5)}
+                    className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+                  >
+                    +5
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreset(player.username, 10)}
+                    className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+                  >
+                    +10
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreset(player.username, 15)}
+                    className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
+                  >
+                    +15
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreset(player.username, 0)}
+                    className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-rose-500/40 hover:text-white"
+                  >
+                    Reset
+                  </button>
+                </div>
+                <div className="rounded-xl border border-slate-700/50 bg-slate-950/35 px-3 py-2 text-[11px] text-slate-300">
+                  {overtakeTarget ? (
+                    <>
+                      {APP_TEXT.simulator.overtake} <span className="text-white font-medium">{overtakeTarget.display_name}</span>
+                      {' '}need {pointsToOvertake} more pts.
+                    </>
+                  ) : (
+                    <>
+                      {APP_TEXT.simulator.holding} <span className="text-white font-medium">#1</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+
+      <ProjectedTotalsChart players={forecastPlayers} />
+
+      <div className="rounded-2xl border border-slate-700/50 overflow-hidden">
+        <div className="bg-slate-800/60 border-b border-slate-700/50 px-4 py-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-medium text-slate-200">Projected leaderboard</h3>
+            <p className="text-xs text-slate-500">Ranks update live as you move the sliders.</p>
+          </div>
+          <span className="text-xs text-slate-400">{forecastPlayers.length} players</span>
+        </div>
+        <div className="divide-y divide-slate-800/50">
+          {forecastPlayers.map((player, index) => (
+            <motion.div
+              key={player.username}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.04 }}
+              className="grid grid-cols-[56px_minmax(0,1fr)_96px_112px_92px] items-center gap-3 px-4 py-3 text-sm"
+            >
+              <div className="flex justify-center">{rankBadge(player.projectedRank)}</div>
+              <div className="min-w-0">
+                <div className="truncate font-medium text-white">{player.display_name}</div>
+                <div className="truncate text-xs text-slate-500">@{player.username}</div>
+              </div>
+              <div className="text-center text-slate-300">
+                <div className="text-xs text-slate-500">Actual</div>
+                <div className="font-medium">{player.total}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xs text-slate-500">Delta</div>
+                <div className={`font-medium ${player.delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {formatDelta(player.delta)}
+                </div>
+              </div>
+              <div className={`text-center font-semibold ${
+                player.rankDelta > 0 ? 'text-emerald-400' : player.rankDelta < 0 ? 'text-rose-400' : 'text-slate-200'
+              }`}>
+                {player.projectedTotal}
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1202,7 +1579,7 @@ function ChatWidget({ open, onOpenChange, onUnlockAdmin }: {
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
-type Tab = 'leaderboard' | 'upload' | 'analytics';
+type Tab = 'leaderboard' | 'upload' | 'analytics' | 'simulator';
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('leaderboard');
@@ -1224,6 +1601,7 @@ export default function App() {
     { id: 'leaderboard', label: APP_TEXT.tabs.leaderboard, icon: <Trophy className="w-4 h-4" /> },
     { id: 'upload',      label: APP_TEXT.tabs.upload, icon: <Upload className="w-4 h-4" /> },
     { id: 'analytics',   label: APP_TEXT.tabs.analytics, icon: <LineChartIcon className="w-4 h-4" /> },
+    { id: 'simulator',   label: APP_TEXT.tabs.simulator, icon: <SlidersHorizontal className="w-4 h-4" /> },
   ];
 
   return (
@@ -1288,6 +1666,7 @@ export default function App() {
           {tab === 'leaderboard' && <Leaderboard data={standings} onRefresh={fetchStandings} loading={loadingStandings} />}
           {tab === 'upload' && <UploadMatch onSuccess={() => { fetchStandings(); setTimeout(() => setTab('leaderboard'), 1500); }} />}
           {tab === 'analytics' && <RankingAnalytics data={standings} />}
+          {tab === 'simulator' && <WhatIfSimulator data={standings} />}
         </motion.div>
 
         <p className="text-center text-slate-600 text-xs mt-8">Powered by Groq · SQLite · {APP_TEXT.hero.title}</p>
