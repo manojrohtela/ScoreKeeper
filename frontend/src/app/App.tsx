@@ -41,7 +41,7 @@ function playerEmoji(username: string) {
   return PLAYER_EMOJIS[hashString(username) % PLAYER_EMOJIS.length];
 }
 
-const SIMULATION_RANGE = 30;
+const SIMULATION_RANGE = 500;
 
 type ForecastPlayer = StandingsResponse['players'][number] & {
   delta: number;
@@ -377,7 +377,7 @@ function RankLineGraph({
                     animate={{ scale: 1, opacity: 1 }}
                     transition={{ duration: 0.32, delay: 0.14 + playerIndex * 0.08 + index * 0.04 }}
                   >
-                    <title>{`${player.name} • ${point.match}: Rank ${rank}`}</title>
+                    <title>{`${player.name} • Match #${index + 1} (${point.match}) • Rank ${rank}`}</title>
                   </motion.circle>
                 );
               })}
@@ -631,19 +631,19 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
 
       <div className="flex flex-wrap gap-2">
         <button
-          onClick={() => setAll(5)}
+          onClick={() => setAll(50)}
           className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
         >
           {APP_TEXT.simulator.presetBoost}
         </button>
         <button
-          onClick={() => setAll(10)}
+          onClick={() => setAll(100)}
           className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
         >
           {APP_TEXT.simulator.presetBig}
         </button>
         <button
-          onClick={() => setAll(15)}
+          onClick={() => setAll(150)}
           className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
         >
           {APP_TEXT.simulator.presetHuge}
@@ -746,9 +746,9 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
                   </div>
                   <input
                     type="range"
-                    min={-SIMULATION_RANGE}
+                    min={0}
                     max={SIMULATION_RANGE}
-                    step={1}
+                    step={5}
                     value={delta}
                     onChange={e => {
                       const next = Number(e.target.value);
@@ -757,31 +757,31 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
                     className="w-full accent-indigo-400"
                   />
                   <div className="flex items-center justify-between text-[11px] text-slate-500">
-                    <span>-{SIMULATION_RANGE}</span>
                     <span>0</span>
-                    <span>+{SIMULATION_RANGE}</span>
+                    <span>{Math.round(SIMULATION_RANGE / 2)}</span>
+                    <span>{SIMULATION_RANGE}</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => setPreset(player.username, 5)}
+                      onClick={() => setPreset(player.username, 50)}
                       className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
                     >
-                      +5
+                      +50
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPreset(player.username, 10)}
+                      onClick={() => setPreset(player.username, 100)}
                       className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
                     >
-                      +10
+                      +100
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPreset(player.username, 15)}
+                      onClick={() => setPreset(player.username, 150)}
                       className="rounded-full border border-slate-700/60 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition-colors hover:border-indigo-500/40 hover:text-white"
                     >
-                      +15
+                      +150
                     </button>
                     <button
                       type="button"
