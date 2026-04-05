@@ -326,9 +326,12 @@ function RankLineGraph({
   const yForRank = (rank: number) => margin.top + ((rank - 1) / Math.max(maxRank - 1, 1)) * innerHeight;
   const xForIndex = (index: number) => margin.left + (graphData.length === 1 ? innerWidth / 2 : index * xStep);
   const matchPoints = Object.fromEntries(standings.players.map((player) => [player.username, player.matches]));
+  const latestIndex = Math.max(graphData.length - 1, 0);
+  const labelOffsetX = 18;
+  const labelOffsetY = 0;
 
   return (
-    <div className="w-full overflow-x-auto rounded-2xl border border-slate-800/60 bg-slate-950/30 p-3">
+    <div className="relative w-full overflow-x-auto rounded-2xl border border-slate-800/60 bg-slate-950/30 p-3">
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[640px]">
         <defs>
           {players.map((player) => {
@@ -421,10 +424,10 @@ function RankLineGraph({
                     <circle
                       cx="0"
                       cy="0"
-                      r={isLatestPoint ? 8.5 : 6.5}
+                      r={isLatestPoint ? 9.5 : 6.5}
                       fill="#0f172a"
                       stroke={color}
-                      strokeWidth={isLatestPoint ? '2.4' : '2'}
+                      strokeWidth={isLatestPoint ? '2.6' : '2'}
                     />
                     <text
                       x="0"
@@ -445,6 +448,66 @@ function RankLineGraph({
           );
         })}
       </svg>
+
+      {graphData.length > 0 && (
+        <div className="pointer-events-none absolute inset-3">
+          {players.map((player, index) => {
+            const avatar = getPlayerAvatar(player.username, avatarRegistry);
+            const latestPoint = graphData[latestIndex];
+            const rank = Number(latestPoint?.[player.username] ?? maxRank);
+            const y = yForRank(rank);
+            const left = ((xForIndex(latestIndex) + labelOffsetX) / width) * 100;
+            const top = ((y + labelOffsetY) / height) * 100;
+            const rankStyle = rank === 1
+              ? 'border-yellow-400/50 bg-yellow-500/15 text-yellow-50'
+              : rank === 2
+                ? 'border-slate-300/50 bg-slate-200/10 text-slate-100'
+                : rank === 3
+                  ? 'border-amber-500/50 bg-amber-500/15 text-amber-50'
+                  : 'border-slate-700/70 bg-slate-950/95 text-slate-100';
+            return (
+              <div
+                key={`end-label-${player.username}`}
+                className={`absolute inline-flex items-center gap-2 rounded-full px-2 py-1 text-[11px] shadow-lg shadow-black/25 ${rankStyle}`}
+                style={{
+                  left: `${left}%`,
+                  top: `${top}%`,
+                  transform: 'translateY(-50%)',
+                  boxShadow: `0 0 0 1px ${avatar.color}55`,
+                }}
+              >
+                <span
+                  className="flex h-5 w-5 items-center justify-center rounded-full text-[10px]"
+                  style={{ backgroundColor: `${avatar.color}22` }}
+                >
+                  {avatar.emoji}
+                </span>
+                <span className="max-w-[8rem] truncate">{player.name}</span>
+                {rank === 1 ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-yellow-400/20 px-1.5 py-0.5 font-semibold text-yellow-100">
+                    <Crown className="h-3 w-3" />
+                    #{rank}
+                  </span>
+                ) : rank === 2 ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-200/15 px-1.5 py-0.5 font-semibold text-slate-100">
+                    <Medal className="h-3 w-3" />
+                    #{rank}
+                  </span>
+                ) : rank === 3 ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-1.5 py-0.5 font-semibold text-amber-100">
+                    <Medal className="h-3 w-3" />
+                    #{rank}
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-slate-800 px-1.5 py-0.5 font-semibold text-slate-200">
+                    #{rank}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-3 mt-4 text-xs">
         {players.map((player, index) => (
