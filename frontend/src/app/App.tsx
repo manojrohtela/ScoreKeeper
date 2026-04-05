@@ -26,7 +26,7 @@ function rankBadge(rank: number) {
   return <span className="text-slate-500 text-sm w-4 text-center">{rank}</span>;
 }
 
-const PLAYER_EMOJIS = ['🎮', '🦊', '🐸', '🤖', '🦄', '🐙', '⚡', '🥷'];
+const PLAYER_EMOJIS = ['🦁', '🐯', '🦊', '🐼', '🐨', '🐵', '🐸', '🐙', '🦄', '🐝', '🦈', '🐧', '🐺', '🦖', '🐲', '🦝', '🦉', '🥷'];
 const GRAPH_PALETTE = ['#818cf8', '#34d399', '#f59e0b', '#f472b6', '#38bdf8', '#c084fc', '#fb7185', '#facc15'];
 
 function hashString(value: string) {
@@ -37,8 +37,46 @@ function hashString(value: string) {
   return hash;
 }
 
-function playerEmoji(username: string) {
-  return PLAYER_EMOJIS[hashString(username) % PLAYER_EMOJIS.length];
+type PlayerAvatar = {
+  emoji: string;
+  index: number;
+  color: string;
+};
+
+function buildAvatarRegistry(usernames: string[]) {
+  const registry: Record<string, PlayerAvatar> = {};
+  const usedIndexes = new Set<number>();
+
+  [...new Set(usernames)].sort().forEach((username) => {
+    let index = hashString(username) % PLAYER_EMOJIS.length;
+    const startIndex = index;
+    while (usedIndexes.has(index)) {
+      index = (index + 1) % PLAYER_EMOJIS.length;
+      if (index === startIndex) break;
+    }
+    usedIndexes.add(index);
+    registry[username] = {
+      emoji: PLAYER_EMOJIS[index],
+      index,
+      color: GRAPH_PALETTE[index % GRAPH_PALETTE.length],
+    };
+  });
+
+  return registry;
+}
+
+function getPlayerAvatar(username: string, registry?: Record<string, PlayerAvatar>) {
+  if (registry?.[username]) return registry[username];
+  const index = hashString(username) % PLAYER_EMOJIS.length;
+  return {
+    emoji: PLAYER_EMOJIS[index],
+    index,
+    color: GRAPH_PALETTE[index % GRAPH_PALETTE.length],
+  };
+}
+
+function playerEmoji(username: string, registry?: Record<string, PlayerAvatar>) {
+  return getPlayerAvatar(username, registry).emoji;
 }
 
 const SIMULATION_RANGE = 500;
@@ -271,11 +309,13 @@ function RankLineGraph({
   players,
   standings,
   maxRank,
+  avatarRegistry,
 }: {
   graphData: RankPoint[];
   players: { username: string; name: string }[];
   standings: StandingsResponse;
   maxRank: number;
+  avatarRegistry: Record<string, PlayerAvatar>;
 }) {
   const width = 860;
   const height = 290;
@@ -291,8 +331,8 @@ function RankLineGraph({
     <div className="w-full overflow-x-auto rounded-2xl border border-slate-800/60 bg-slate-950/30 p-3">
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[640px]">
         <defs>
-          {players.map((player, playerIndex) => {
-            const color = GRAPH_PALETTE[playerIndex % GRAPH_PALETTE.length];
+          {players.map((player) => {
+            const color = getPlayerAvatar(player.username, avatarRegistry).color;
             return (
               <linearGradient id={`line-${player.username}`} key={player.username} x1="0%" y1="0%" x2="100%" y2="0%">
                 <stop offset="0%" stopColor={color} stopOpacity="1" />
@@ -345,11 +385,12 @@ function RankLineGraph({
         ))}
 
         {players.map((player, playerIndex) => {
+          const avatar = getPlayerAvatar(player.username, avatarRegistry);
           const path = graphData.map((point, index) => {
             const rank = Number(point[player.username] ?? maxRank);
             return `${index === 0 ? 'M' : 'L'} ${xForIndex(index)} ${yForRank(rank)}`;
           }).join(' ');
-          const color = GRAPH_PALETTE[playerIndex % GRAPH_PALETTE.length];
+          const color = avatar.color;
 
           return (
             <g key={player.username}>
@@ -368,21 +409,36 @@ function RankLineGraph({
               {graphData.map((point, index) => {
                 const rank = Number(point[player.username] ?? maxRank);
                 const points = Number(matchPoints[player.username]?.[point.match] ?? 0);
+                const isLatestPoint = index === graphData.length - 1;
                 return (
-                  <motion.circle
+                  <motion.g
                     key={`${player.username}-${point.match}`}
-                    cx={xForIndex(index)}
-                    cy={yForRank(rank)}
-                    r="4"
-                    fill="#0f172a"
-                    stroke={color}
-                    strokeWidth="2"
                     initial={{ scale: 0, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
                     transition={{ duration: 0.32, delay: 0.14 + playerIndex * 0.08 + index * 0.04 }}
+                    transform={`translate(${xForIndex(index)} ${yForRank(rank)})`}
                   >
+                    <circle
+                      cx="0"
+                      cy="0"
+                      r={isLatestPoint ? 8.5 : 6.5}
+                      fill="#0f172a"
+                      stroke={color}
+                      strokeWidth={isLatestPoint ? '2.4' : '2'}
+                    />
+                    <text
+                      x="0"
+                      y="0.5"
+                      fill="#ffffff"
+                      fontSize={isLatestPoint ? '10.5' : '9.5'}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      style={{ pointerEvents: 'none' }}
+                    >
+                      {avatar.emoji}
+                    </text>
                     <title>{`${player.name} • Match #${index + 1} (${point.match}) • Points ${points} • Rank ${rank}`}</title>
-                  </motion.circle>
+                  </motion.g>
                 );
               })}
             </g>
@@ -401,9 +457,9 @@ function RankLineGraph({
           >
             <span
               className="flex h-6 w-6 items-center justify-center rounded-full text-[11px]"
-              style={{ backgroundColor: `${GRAPH_PALETTE[index % GRAPH_PALETTE.length]}22` }}
+              style={{ backgroundColor: `${getPlayerAvatar(player.username, avatarRegistry).color}22` }}
             >
-              {playerEmoji(player.username)}
+              {playerEmoji(player.username, avatarRegistry)}
             </span>
             <span className="max-w-[11rem] truncate">{player.name}</span>
           </motion.div>
@@ -431,6 +487,7 @@ function RankingAnalytics({ data }: { data: StandingsResponse | null }) {
     return <p className="text-slate-400 text-sm">{APP_TEXT.analytics.empty}</p>;
   }
 
+  const avatarRegistry = buildAvatarRegistry(data.players.map((player) => player.username));
   const playerMeta = data.players.map((player) => ({ username: player.username, name: player.display_name }));
   const filteredPlayers = playerMeta.filter((player) => selectedPlayers.includes(player.username));
   const matchWiseRankData = buildMatchWiseRankData(data);
@@ -479,6 +536,7 @@ function RankingAnalytics({ data }: { data: StandingsResponse | null }) {
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {playerMeta.map((player, index) => {
           const checked = selectedPlayers.includes(player.username);
+          const avatar = getPlayerAvatar(player.username, avatarRegistry);
           return (
             <motion.label
               key={player.username}
@@ -503,8 +561,11 @@ function RankingAnalytics({ data }: { data: StandingsResponse | null }) {
                 className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-lg transition-transform ${
                   checked ? 'scale-105 bg-gradient-to-br from-indigo-400 to-fuchsia-400' : 'bg-slate-800'
                 }`}
+                style={{
+                  boxShadow: `0 0 0 1px ${avatar.color}55, 0 10px 24px ${avatar.color}22`,
+                }}
               >
-                {playerEmoji(player.username)}
+                {avatar.emoji}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium text-white">{player.name}</span>
@@ -548,7 +609,13 @@ function RankingAnalytics({ data }: { data: StandingsResponse | null }) {
                     {APP_TEXT.analytics.legendHint}
                   </span>
                 </div>
-                <RankLineGraph graphData={graph.dataSource} players={filteredPlayers} standings={data} maxRank={data.players.length} />
+                <RankLineGraph
+                  graphData={graph.dataSource}
+                  players={filteredPlayers}
+                  standings={data}
+                  maxRank={data.players.length}
+                  avatarRegistry={avatarRegistry}
+                />
               </motion.div>
             ))}
           </motion.div>
@@ -589,6 +656,7 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
     return <p className="text-slate-400 text-sm">{APP_TEXT.analytics.empty}</p>;
   }
 
+  const avatarRegistry = buildAvatarRegistry(data.players.map((player) => player.username));
   const forecastPlayers = buildForecastPlayers(data.players, deltas);
   const forecastByUsername = Object.fromEntries(forecastPlayers.map((player) => [player.username, player]));
   const projectedLeader = forecastPlayers[0];
@@ -658,7 +726,7 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
         <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4">
           <p className="text-xs uppercase tracking-wide text-indigo-200/80">{APP_TEXT.simulator.leader}</p>
           <div className="mt-2 text-lg font-semibold text-white">
-            {projectedLeader ? `${playerEmoji(projectedLeader.username)} ${projectedLeader.display_name}` : '—'}
+            {projectedLeader ? `${playerEmoji(projectedLeader.username, avatarRegistry)} ${projectedLeader.display_name}` : '—'}
           </div>
           <p className="text-sm text-indigo-100/80 mt-1">Rank #{projectedLeader?.projectedRank ?? '—'} · {projectedLeader ? projectedLeader.projectedTotal : '—'} pts</p>
         </div>
@@ -666,7 +734,7 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
         <div className="rounded-2xl border border-slate-700/50 bg-slate-900/45 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-400">{APP_TEXT.simulator.biggestMover}</p>
           <div className="mt-2 text-lg font-semibold text-white">
-            {biggestMover ? `${playerEmoji(biggestMover.username)} ${biggestMover.display_name}` : '—'}
+            {biggestMover ? `${playerEmoji(biggestMover.username, avatarRegistry)} ${biggestMover.display_name}` : '—'}
           </div>
           <p className="text-sm text-slate-300 mt-1">
             {biggestMover ? `${biggestMover.rankDelta > 0 ? '+' : ''}${biggestMover.rankDelta} rank change` : '—'}
@@ -729,7 +797,7 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-800 text-lg">
-                    {playerEmoji(player.username)}
+                    {playerEmoji(player.username, avatarRegistry)}
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 min-w-0">
@@ -847,7 +915,7 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
             >
               <div className="flex justify-center">{rankBadge(player.projectedRank)}</div>
               <div className="min-w-0">
-                <div className="truncate font-medium text-white">{player.display_name}</div>
+                <div className="truncate font-medium text-white">{playerEmoji(player.username, avatarRegistry)} {player.display_name}</div>
                 <div className="truncate text-xs text-slate-500">@{player.username}</div>
               </div>
               <div className="text-center text-slate-300">
