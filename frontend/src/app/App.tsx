@@ -269,10 +269,12 @@ function buildCumulativeRankData(data: StandingsResponse): RankPoint[] {
 function RankLineGraph({
   graphData,
   players,
+  standings,
   maxRank,
 }: {
   graphData: RankPoint[];
   players: { username: string; name: string }[];
+  standings: StandingsResponse;
   maxRank: number;
 }) {
   const width = 860;
@@ -283,6 +285,7 @@ function RankLineGraph({
   const xStep = graphData.length > 1 ? innerWidth / (graphData.length - 1) : 0;
   const yForRank = (rank: number) => margin.top + ((rank - 1) / Math.max(maxRank - 1, 1)) * innerHeight;
   const xForIndex = (index: number) => margin.left + (graphData.length === 1 ? innerWidth / 2 : index * xStep);
+  const matchPoints = Object.fromEntries(standings.players.map((player) => [player.username, player.matches]));
 
   return (
     <div className="w-full overflow-x-auto rounded-2xl border border-slate-800/60 bg-slate-950/30 p-3">
@@ -364,6 +367,7 @@ function RankLineGraph({
               />
               {graphData.map((point, index) => {
                 const rank = Number(point[player.username] ?? maxRank);
+                const points = Number(matchPoints[player.username]?.[point.match] ?? 0);
                 return (
                   <motion.circle
                     key={`${player.username}-${point.match}`}
@@ -377,7 +381,7 @@ function RankLineGraph({
                     animate={{ scale: 1, opacity: 1 }}
                     transition={{ duration: 0.32, delay: 0.14 + playerIndex * 0.08 + index * 0.04 }}
                   >
-                    <title>{`${player.name} • Match #${index + 1} (${point.match}) • Rank ${rank}`}</title>
+                    <title>{`${player.name} • Match #${index + 1} (${point.match}) • Points ${points} • Rank ${rank}`}</title>
                   </motion.circle>
                 );
               })}
@@ -544,7 +548,7 @@ function RankingAnalytics({ data }: { data: StandingsResponse | null }) {
                     {APP_TEXT.analytics.legendHint}
                   </span>
                 </div>
-                <RankLineGraph graphData={graph.dataSource} players={filteredPlayers} maxRank={data.players.length} />
+                <RankLineGraph graphData={graph.dataSource} players={filteredPlayers} standings={data} maxRank={data.players.length} />
               </motion.div>
             ))}
           </motion.div>
@@ -887,6 +891,7 @@ function UploadMatch({ onSuccess }: { onSuccess: () => void }) {
   const [extractErr, setExtractErr] = useState('');
 
   const [players, setPlayers] = useState<ExtractedPlayer[]>([]);
+  const [matchTitle, setMatchTitle] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState('');
 
@@ -924,8 +929,9 @@ function UploadMatch({ onSuccess }: { onSuccess: () => void }) {
     if (!file) return;
     setExtracting(true); setExtractErr('');
     try {
-      const { players: p } = await extractFromImage(file);
+      const { players: p, match_title } = await extractFromImage(file);
       setPlayers(p); setStep('verify');
+      setMatchTitle(match_title?.trim() ?? '');
     } catch (e: unknown) { setExtractErr(e instanceof Error ? e.message : 'Extraction failed'); }
     finally { setExtracting(false); }
   };
@@ -933,7 +939,11 @@ function UploadMatch({ onSuccess }: { onSuccess: () => void }) {
   const handleConfirm = async () => {
     setSaving(true); setSaveErr('');
     try {
-      await confirmUpload(code, players.map(p => ({ username: p.username, points: p.points })));
+      await confirmUpload(
+        code,
+        players.map(p => ({ username: p.username, points: p.points })),
+        matchTitle.trim() || undefined,
+      );
       setStep('done'); onSuccess();
     } catch (e: unknown) { setSaveErr(e instanceof Error ? e.message : 'Save failed'); }
     finally { setSaving(false); }
@@ -951,7 +961,7 @@ function UploadMatch({ onSuccess }: { onSuccess: () => void }) {
 
   const reset = () => {
     setStep('code'); setCode(''); setFile(null); setPreview(null);
-    setPlayers([]); setCodeErr(''); setExtractErr(''); setSaveErr('');
+    setPlayers([]); setMatchTitle(''); setCodeErr(''); setExtractErr(''); setSaveErr('');
   };
 
   return (
@@ -1043,11 +1053,31 @@ function UploadMatch({ onSuccess }: { onSuccess: () => void }) {
       )}
 
       {/* Step: verify & edit */}
-      {step === 'verify' && (
+          {step === 'verify' && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
           <div className="flex items-center gap-2 text-slate-300 text-sm">
             <Pencil className="w-4 h-4 text-indigo-400" />
             {APP_TEXT.upload.review}
+          </div>
+
+          {matchTitle && (
+            <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-4 py-3 text-sm text-indigo-100">
+              <span className="text-indigo-200 font-medium">Match:</span> {matchTitle}
+            </div>
+          )}
+          <div className="space-y-2 rounded-xl border border-slate-700/50 bg-slate-900/45 p-4">
+            <label className="block text-xs font-medium uppercase tracking-wide text-slate-400">
+              Match title
+            </label>
+            <input
+              value={matchTitle}
+              onChange={e => setMatchTitle(e.target.value)}
+              placeholder="SRH vs RCB"
+              className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500/60"
+            />
+            <p className="text-xs text-slate-500">
+              You can fix this before saving if the screenshot title is clipped or blurry.
+            </p>
           </div>
 
           <div className="rounded-xl border border-slate-700/50 overflow-hidden">
@@ -1294,6 +1324,7 @@ function AdminPanel({ onSuccess }: { onSuccess: () => void }) {
   const [code, setCode] = useState('');
   const [matches, setMatches] = useState<{ id: number; name: string }[]>([]);
   const [selectedMatchId, setSelectedMatchId] = useState<number | null>(null);
+  const [matchName, setMatchName] = useState('');
   const [players, setPlayers] = useState<AdminMatchPlayer[]>([]);
   const [loadingMatches, setLoadingMatches] = useState(false);
   const [loadingMatch, setLoadingMatch] = useState(false);
@@ -1328,6 +1359,7 @@ function AdminPanel({ onSuccess }: { onSuccess: () => void }) {
     const loadSelectedMatch = async () => {
       if (selectedMatchId == null) {
         setPlayers([]);
+        setMatchName('');
         return;
       }
       setLoadingMatch(true);
@@ -1335,10 +1367,12 @@ function AdminPanel({ onSuccess }: { onSuccess: () => void }) {
       try {
         const detail = await getMatch(selectedMatchId);
         setPlayers(detail.players);
+        setMatchName(detail.match_name);
         setStatus(`${APP_TEXT.admin.loadPrefix} ${detail.match_name}.`);
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : APP_TEXT.admin.loadMatchError);
         setPlayers([]);
+        setMatchName('');
       } finally {
         setLoadingMatch(false);
       }
@@ -1367,6 +1401,7 @@ function AdminPanel({ onSuccess }: { onSuccess: () => void }) {
         selectedMatchId,
         adminCode,
         players.map(p => ({ username: p.username, points: p.points })),
+        matchName.trim() || undefined,
       );
       setStatus(res.message);
       await refreshMatches(selectedMatchId);
@@ -1410,6 +1445,7 @@ function AdminPanel({ onSuccess }: { onSuccess: () => void }) {
       setStatus(res.message);
       await refreshMatches(null);
       setPlayers([]);
+      setMatchName('');
       onSuccess();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : APP_TEXT.admin.resetDataError);
@@ -1471,6 +1507,22 @@ function AdminPanel({ onSuccess }: { onSuccess: () => void }) {
           </p>
         </div>
       </div>
+
+      {selectedMatchId != null && (
+        <div className="bg-slate-900/60 border border-slate-700/50 rounded-xl p-4 space-y-3">
+          <label className="block text-sm text-slate-400">Match Title</label>
+          <input
+            type="text"
+            value={matchName}
+            onChange={e => setMatchName(e.target.value)}
+            placeholder="SRH vs RCB"
+            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500/60 text-sm"
+          />
+          <p className="text-xs text-slate-500">
+            Rename the saved match here if you want the admin panel and standings to show the exact matchup title.
+          </p>
+        </div>
+      )}
 
       {status && (
         <div className="flex items-start gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-emerald-400 text-sm">

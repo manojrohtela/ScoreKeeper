@@ -46,6 +46,7 @@ class ExtractedPlayer(BaseModel):
 
 class ExtractResponse(BaseModel):
     players: list[ExtractedPlayer]   # all 8 fixed players, points pre-filled from image
+    match_title: str = ""
 
 
 # ── Confirm upload ──────────────────────────────────────────────────────────
@@ -57,6 +58,7 @@ class PlayerScore(BaseModel):
 class ConfirmUploadRequest(BaseModel):
     code: str
     players: list[PlayerScore]
+    match_name: str | None = None
 
 
 class ConfirmUploadResponse(BaseModel):

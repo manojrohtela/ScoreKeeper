@@ -238,6 +238,15 @@ def _extract_players_from_result(
     return extracted
 
 
+def _extract_match_title(result: dict) -> str:
+    title = str(result.get("match_title", "")).strip()
+    if not title or title == "—":
+        return ""
+    title = re.sub(r"\bLive\b", "", title, flags=re.IGNORECASE).strip(" -–—|")
+    title = re.sub(r"\s+", " ", title).strip()
+    return title
+
+
 def _build_vision_prompt(base_prompt: str, candidate_usernames: list[str]) -> str:
     candidates = "\n".join(f"- {username}" for username in candidate_usernames)
     return (
@@ -283,7 +292,7 @@ class ScoreKeeperService:
 
     # ── Image extraction ────────────────────────────────────────────────────
 
-    def extract_from_image(self, image_bytes: bytes, content_type: str) -> list[dict]:
+    def extract_from_image(self, image_bytes: bytes, content_type: str) -> dict:
         """
         Call vision LLM, fuzzy-map names to the 8 fixed players.
         Returns list of {username, display_name, raw_name, points} for ALL 8 players.
@@ -292,6 +301,7 @@ class ScoreKeeperService:
             raise ValueError(IMAGE_TOO_LARGE_ERROR)
         groq = self._get_groq()
         extracted: dict[str, tuple[float, str, float]] = {}
+        match_title = ""
         for variant_index, prepared_bytes in enumerate(_vision_image_variants(image_bytes)):
             b64 = base64.b64encode(prepared_bytes).decode()
             prompt = _build_vision_prompt(
@@ -325,6 +335,8 @@ class ScoreKeeperService:
                 result = json.loads(m.group()) if m else {}
 
             variant_extracted = _extract_players_from_result(result, self._matchable_usernames)
+            if not match_title:
+                match_title = _extract_match_title(result)
             for username, candidate in variant_extracted.items():
                 current = extracted.get(username)
                 if current is None or candidate[2] > current[2] or (
@@ -334,7 +346,7 @@ class ScoreKeeperService:
 
         # Build full list of all 8 players
         player_map = {u: dn for u, dn in FIXED_PLAYERS}
-        return [
+        players = [
             {
                 "username":     u,
                 "display_name": player_map[u],
@@ -343,15 +355,18 @@ class ScoreKeeperService:
             }
             for u in self._usernames
         ]
+        return {"players": players, "match_title": match_title}
 
     # ── Save confirmed match ────────────────────────────────────────────────
 
-    def save_match(self, player_scores: list[dict]) -> tuple[str, int]:
+    def save_match(self, player_scores: list[dict], match_name: str | None = None) -> tuple[str, int]:
         """player_scores: [{username, points}]"""
         with _conn() as con:
             match_number = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM matches").fetchone()[0]
-            match_name = f"Match {match_number}"
-            cur = con.execute("INSERT INTO matches (name) VALUES (%s) RETURNING id", (match_name,))
+            clean_match_name = (match_name or "").strip()
+            if not clean_match_name:
+                clean_match_name = f"Match {match_number}"
+            cur = con.execute("INSERT INTO matches (name) VALUES (%s) RETURNING id", (clean_match_name,))
             match_id = cur.fetchone()["id"]
             for ps in player_scores:
                 username = _canonical_username(ps["username"])
@@ -360,7 +375,7 @@ class ScoreKeeperService:
                     " ON CONFLICT (username, match_id) DO UPDATE SET points=EXCLUDED.points",
                     (username, match_id, ps["points"]),
                 )
-        return match_name, match_number
+        return clean_match_name, match_number
 
     def list_matches(self) -> list[dict]:
         with _conn() as con:
@@ -395,11 +410,19 @@ class ScoreKeeperService:
             "players": players,
         }
 
-    def update_match(self, match_id: int, player_scores: list[dict]) -> tuple[str, int]:
+    def update_match(
+        self,
+        match_id: int,
+        player_scores: list[dict],
+        match_name: str | None = None,
+    ) -> tuple[str, int]:
         with _conn() as con:
             match = con.execute("SELECT name FROM matches WHERE id=%s", (match_id,)).fetchone()
             if match is None:
                 raise ValueError("Match not found.")
+            clean_match_name = (match_name or "").strip()
+            if clean_match_name and clean_match_name != match["name"]:
+                con.execute("UPDATE matches SET name=%s WHERE id=%s", (clean_match_name, match_id))
             for ps in player_scores:
                 username = _canonical_username(ps["username"])
                 con.execute(
@@ -407,7 +430,7 @@ class ScoreKeeperService:
                     "ON CONFLICT (username, match_id) DO UPDATE SET points=EXCLUDED.points",
                     (username, match_id, ps["points"]),
                 )
-        return match["name"], match_id
+        return clean_match_name or match["name"], match_id
 
     def delete_match(self, match_id: int) -> str:
         with _conn() as con:

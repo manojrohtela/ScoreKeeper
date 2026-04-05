@@ -48,11 +48,12 @@ export const extractFromImage = (file: File): Promise<ExtractResponse> => {
 export const confirmUpload = (
   code: string,
   players: { username: string; points: number }[],
+  match_name?: string,
 ): Promise<ConfirmUploadResponse> =>
   req<ConfirmUploadResponse>('/confirm-upload', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, players }),
+    body: JSON.stringify({ code, players, match_name }),
   });
 
 export const sendChat = (question: string): Promise<ChatResponse> =>
@@ -66,11 +67,12 @@ export const updateMatch = (
   matchId: number,
   code: string,
   players: { username: string; points: number }[],
+  match_name?: string,
 ): Promise<AdminActionResponse> =>
   req<AdminActionResponse>(`/matches/${matchId}/update`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, players }),
+    body: JSON.stringify({ code, players, match_name }),
   });
 
 export const deleteMatch = (matchId: number, code: string): Promise<AdminActionResponse> =>

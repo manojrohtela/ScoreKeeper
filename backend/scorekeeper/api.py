@@ -51,6 +51,7 @@ def update_match(match_id: int, req: ConfirmUploadRequest):
         match_name, _ = get_service().update_match(
             match_id,
             [p.model_dump() for p in req.players],
+            req.match_name,
         )
     except ValueError as e:
         raise HTTPException(404, str(e))
@@ -90,14 +91,14 @@ async def upload_match(file: UploadFile = File(...)):
         raise HTTPException(400, "Only image files are supported.")
     image_bytes = await file.read()
     try:
-        players = get_service().extract_from_image(image_bytes, file.content_type or "image/jpeg")
+        extracted = get_service().extract_from_image(image_bytes, file.content_type or "image/jpeg")
     except ValueError as e:
         raise HTTPException(413, str(e))
     except RuntimeError as e:
         raise HTTPException(503, str(e))
     except Exception as e:
         raise HTTPException(500, f"Image extraction failed: {e}")
-    return ExtractResponse(players=players)
+    return ExtractResponse(**extracted)
 
 
 # ── Confirm: verify code + save ───────────────────────────────────────────────
@@ -107,7 +108,8 @@ def confirm_upload(req: ConfirmUploadRequest):
         raise HTTPException(401, "Invalid admin code.")
     try:
         match_name, match_number = get_service().save_match(
-            [p.model_dump() for p in req.players]
+            [p.model_dump() for p in req.players],
+            req.match_name,
         )
     except Exception as e:
         raise HTTPException(500, f"Failed to save: {e}")

@@ -64,13 +64,15 @@ NO_MATCH_DATA_MESSAGE = (
 VISION_PROMPT = (
     "This is a mobile screenshot of a fantasy cricket leaderboard.\n"
     "The leaderboard contains 8 player rows. Read every visible row, not just the first few.\n"
+    "Also read the match title/team matchup shown at the top of the screenshot, such as 'GT vs RR'.\n"
+    "If a match title is visible, extract it exactly as shown and exclude words like 'Live' or UI labels.\n"
     "Extract only the visible player/team usernames and their numeric score/points.\n"
     "Ignore headers, logos, buttons, tabs, icons, and any surrounding UI text.\n"
     "Preserve usernames exactly as shown, including underscores, dots, and digits.\n"
     "If a username is partially unclear, use the closest visible spelling from the screenshot.\n"
     "Return every row you can see, even if some are partially cut off.\n"
     "Return ONLY valid JSON — no markdown, no explanation:\n"
-    '{"players": [{"name": "...", "points": 42}, ...]}\n'
+    '{"match_title": "GT vs RR", "players": [{"name": "...", "points": 42}, ...]}\n'
     "Keep names exactly as shown."
 )
 
@@ -78,11 +80,12 @@ VISION_CROP_PROMPT = (
     "This is a cropped slice of a fantasy cricket leaderboard screenshot.\n"
     "Read every visible player/team row in this slice.\n"
     "There may be only 1 or 2 rows visible here.\n"
+    "If a match title is visible in this slice, extract it exactly as shown and exclude words like 'Live' or UI labels.\n"
     "Extract only visible usernames and their numeric score/points.\n"
     "Ignore headers, logos, buttons, tabs, icons, and any surrounding UI text.\n"
     "Preserve usernames exactly as shown, including underscores, dots, and digits.\n"
     "Return ONLY valid JSON — no markdown, no explanation:\n"
-    '{"players": [{"name": "...", "points": 42}, ...]}\n'
+    '{"match_title": "", "players": [{"name": "...", "points": 42}, ...]}\n'
     "Keep names exactly as shown."
 )
 

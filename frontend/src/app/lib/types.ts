@@ -46,6 +46,7 @@ export interface ExtractedPlayer {
 
 export interface ExtractResponse {
   players: ExtractedPlayer[];
+  match_title: string;
 }
 
 export interface ConfirmUploadResponse {
