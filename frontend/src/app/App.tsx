@@ -458,51 +458,25 @@ function RankLineGraph({
             const y = yForRank(rank);
             const left = ((xForIndex(latestIndex) + labelOffsetX) / width) * 100;
             const top = ((y + labelOffsetY) / height) * 100;
-            const rankStyle = rank === 1
-              ? 'border-yellow-400/50 bg-yellow-500/15 text-yellow-50'
-              : rank === 2
-                ? 'border-slate-300/50 bg-slate-200/10 text-slate-100'
-                : rank === 3
-                  ? 'border-amber-500/50 bg-amber-500/15 text-amber-50'
-                  : 'border-slate-700/70 bg-slate-950/95 text-slate-100';
             return (
               <div
                 key={`end-label-${player.username}`}
-                className={`absolute inline-flex items-center gap-2 rounded-full px-2 py-1 text-[11px] shadow-lg shadow-black/25 ${rankStyle}`}
+                className="absolute flex h-9 w-9 items-center justify-center rounded-full border bg-slate-950/95 text-[18px] shadow-lg shadow-black/25"
                 style={{
                   left: `${left}%`,
                   top: `${top}%`,
                   transform: 'translateY(-50%)',
                   boxShadow: `0 0 0 1px ${avatar.color}55`,
+                  borderColor: avatar.color,
                 }}
+                title={`${player.name} • Final rank #${rank}`}
               >
                 <span
-                  className="flex h-5 w-5 items-center justify-center rounded-full text-[10px]"
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-sm"
                   style={{ backgroundColor: `${avatar.color}22` }}
                 >
                   {avatar.emoji}
                 </span>
-                <span className="max-w-[8rem] truncate">{player.name}</span>
-                {rank === 1 ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-yellow-400/20 px-1.5 py-0.5 font-semibold text-yellow-100">
-                    <Crown className="h-3 w-3" />
-                    #{rank}
-                  </span>
-                ) : rank === 2 ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-200/15 px-1.5 py-0.5 font-semibold text-slate-100">
-                    <Medal className="h-3 w-3" />
-                    #{rank}
-                  </span>
-                ) : rank === 3 ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-1.5 py-0.5 font-semibold text-amber-100">
-                    <Medal className="h-3 w-3" />
-                    #{rank}
-                  </span>
-                ) : (
-                  <span className="rounded-full bg-slate-800 px-1.5 py-0.5 font-semibold text-slate-200">
-                    #{rank}
-                  </span>
-                )}
               </div>
             );
           })}
