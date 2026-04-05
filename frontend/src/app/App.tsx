@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useCallback, useId, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Trophy, Upload, MessageSquare, RefreshCw, FileDown,
@@ -26,8 +26,17 @@ function rankBadge(rank: number) {
   return <span className="text-slate-500 text-sm w-4 text-center">{rank}</span>;
 }
 
-const PLAYER_EMOJIS = ['🦁', '🐯', '🦊', '🐼', '🐨', '🐵', '🐸', '🐙', '🦄', '🐝', '🦈', '🐧', '🐺', '🦖', '🐲', '🦝', '🦉', '🥷'];
-const GRAPH_PALETTE = ['#818cf8', '#34d399', '#f59e0b', '#f472b6', '#38bdf8', '#c084fc', '#fb7185', '#facc15'];
+// 8 visually distinct colors, one per player
+const GRAPH_PALETTE = [
+  '#ef4444', // red
+  '#f97316', // orange
+  '#eab308', // yellow
+  '#22c55e', // green
+  '#06b6d4', // cyan
+  '#3b82f6', // blue
+  '#a855f8', // purple
+  '#ec4899', // pink
+];
 
 function hashString(value: string) {
   let hash = 0;
@@ -38,46 +47,27 @@ function hashString(value: string) {
 }
 
 type PlayerAvatar = {
-  emoji: string;
   index: number;
   color: string;
 };
 
 function buildAvatarRegistry(usernames: string[]) {
   const registry: Record<string, PlayerAvatar> = {};
-  const usedIndexes = new Set<number>();
-
-  [...new Set(usernames)].sort().forEach((username) => {
-    let index = hashString(username) % PLAYER_EMOJIS.length;
-    const startIndex = index;
-    while (usedIndexes.has(index)) {
-      index = (index + 1) % PLAYER_EMOJIS.length;
-      if (index === startIndex) break;
-    }
-    usedIndexes.add(index);
+  [...new Set(usernames)].sort().forEach((username, position) => {
     registry[username] = {
-      emoji: PLAYER_EMOJIS[index],
-      index,
-      color: GRAPH_PALETTE[index % GRAPH_PALETTE.length],
+      index: position,
+      color: GRAPH_PALETTE[position % GRAPH_PALETTE.length],
     };
   });
-
   return registry;
 }
 
 function getPlayerAvatar(username: string, registry?: Record<string, PlayerAvatar>) {
   if (registry?.[username]) return registry[username];
-  const index = hashString(username) % PLAYER_EMOJIS.length;
-  return {
-    emoji: PLAYER_EMOJIS[index],
-    index,
-    color: GRAPH_PALETTE[index % GRAPH_PALETTE.length],
-  };
+  const index = hashString(username) % GRAPH_PALETTE.length;
+  return { index, color: GRAPH_PALETTE[index] };
 }
 
-function playerEmoji(username: string, registry?: Record<string, PlayerAvatar>) {
-  return getPlayerAvatar(username, registry).emoji;
-}
 
 const SIMULATION_RANGE = 500;
 
@@ -317,72 +307,34 @@ function RankLineGraph({
   maxRank: number;
   avatarRegistry: Record<string, PlayerAvatar>;
 }) {
+  const filterId = `graphGlow-${useId().replace(/:/g, '')}`;
   const width = 860;
-  const height = 290;
-  const margin = { top: 16, right: 30, bottom: 46, left: 34 };
+  const height = 320;
+  const margin = { top: 20, right: 20, bottom: 46, left: 34 };
   const innerWidth = width - margin.left - margin.right;
   const innerHeight = height - margin.top - margin.bottom;
   const xStep = graphData.length > 1 ? innerWidth / (graphData.length - 1) : 0;
   const yForRank = (rank: number) => margin.top + ((rank - 1) / Math.max(maxRank - 1, 1)) * innerHeight;
   const xForIndex = (index: number) => margin.left + (graphData.length === 1 ? innerWidth / 2 : index * xStep);
   const matchPoints = Object.fromEntries(standings.players.map((player) => [player.username, player.matches]));
-  const latestIndex = Math.max(graphData.length - 1, 0);
-  const labelOffsetX = 18;
-  const labelSize = 34;
-  const labelGap = 38;
-  const labelMinY = margin.top + 10;
-  const labelMaxY = height - margin.bottom - 10;
-  type EndLabel = {
-    player: { username: string; name: string };
-    avatar: PlayerAvatar;
-    rank: number;
-    rawY: number;
-    adjustedY?: number;
-  };
-  const endLabels = players
-    .map((player) => {
-      const latestPoint = graphData[latestIndex];
-      const rank = Number(latestPoint?.[player.username] ?? maxRank);
-      const rawY = yForRank(rank);
-      return {
-        player,
-        avatar: getPlayerAvatar(player.username, avatarRegistry),
-        rank,
-        rawY,
-      } satisfies EndLabel;
-    })
-    .sort((a, b) => a.rawY - b.rawY)
-    .map((item, index, list) => {
-      const previous = index > 0 ? list[index - 1] : null;
-      let adjustedY = previous ? Math.max(item.rawY, previous.adjustedY + labelGap) : item.rawY;
-      if (index === list.length - 1 && adjustedY > labelMaxY) {
-        const overflow = adjustedY - labelMaxY;
-        adjustedY -= overflow;
-      }
-      if (index === 0 && adjustedY < labelMinY) {
-        adjustedY = labelMinY;
-      }
-      return {
-        ...item,
-        adjustedY: Math.min(Math.max(adjustedY, labelMinY), labelMaxY),
-      };
-    });
 
   return (
-    <div className="relative w-full overflow-x-auto rounded-2xl border border-slate-800/60 bg-slate-950/30 p-3">
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[640px]">
+    <div className="rounded-2xl border border-slate-800/60 bg-slate-950/30 p-3">
+      <div className="flex items-stretch gap-3">
+        <div className="min-w-0 flex-1 overflow-x-auto">
+          <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[640px]">
         <defs>
           {players.map((player) => {
             const color = getPlayerAvatar(player.username, avatarRegistry).color;
             return (
-              <linearGradient id={`line-${player.username}`} key={player.username} x1="0%" y1="0%" x2="100%" y2="0%">
+              <linearGradient id={`${filterId}-line-${player.username}`} key={player.username} x1="0%" y1="0%" x2="100%" y2="0%">
                 <stop offset="0%" stopColor={color} stopOpacity="1" />
                 <stop offset="50%" stopColor={color} stopOpacity="1" />
                 <stop offset="100%" stopColor={color} stopOpacity="1" />
               </linearGradient>
             );
           })}
-          <filter id="graphGlow" x="-20%" y="-20%" width="140%" height="140%">
+          <filter id={filterId} x="-20%" y="-20%" width="140%" height="140%">
             <feGaussianBlur stdDeviation="2.6" result="blur" />
             <feColorMatrix
               in="blur"
@@ -438,11 +390,11 @@ function RankLineGraph({
               <motion.path
                 d={path}
                 fill="none"
-                stroke={`url(#line-${player.username})`}
+                stroke={`url(#${filterId}-line-${player.username})`}
                 strokeWidth="3.25"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                filter="url(#graphGlow)"
+                filter={`url(#${filterId})`}
                 initial={{ pathLength: 0, opacity: 0.8 }}
                 animate={{ pathLength: 1, opacity: 1 }}
                 transition={{ duration: 1.05, ease: 'easeOut', delay: playerIndex * 0.12 }}
@@ -462,22 +414,10 @@ function RankLineGraph({
                     <circle
                       cx="0"
                       cy="0"
-                      r={isLatestPoint ? 9.5 : 6.5}
-                      fill="#0f172a"
-                      stroke={color}
-                      strokeWidth={isLatestPoint ? '2.6' : '2'}
+                      r={isLatestPoint ? 5 : 3.5}
+                      fill={color}
+                      opacity={isLatestPoint ? 1 : 0.6}
                     />
-                    <text
-                      x="0"
-                      y="0.5"
-                      fill="#ffffff"
-                      fontSize={isLatestPoint ? '10.5' : '9.5'}
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      style={{ pointerEvents: 'none' }}
-                    >
-                      {avatar.emoji}
-                    </text>
                     <title>{`${player.name} • Match #${index + 1} (${point.match}) • Points ${points} • Rank ${rank}`}</title>
                   </motion.g>
                 );
@@ -485,58 +425,27 @@ function RankLineGraph({
             </g>
           );
         })}
-      </svg>
 
-      {graphData.length > 0 && (
-        <div className="pointer-events-none absolute inset-3">
-          {endLabels.map(({ player, avatar, rank, adjustedY }, index) => {
-            const left = ((xForIndex(latestIndex) + labelOffsetX) / width) * 100;
-            const top = ((adjustedY ?? yForRank(rank)) / height) * 100;
-            return (
-              <div
-                key={`end-label-${player.username}`}
-                className="absolute flex items-center justify-center rounded-full border bg-slate-950/95 shadow-lg shadow-black/25"
-                style={{
-                  width: `${labelSize}px`,
-                  height: `${labelSize}px`,
-                  left: `${left}%`,
-                  top: `${top}%`,
-                  transform: 'translateY(-50%)',
-                  boxShadow: `0 0 0 1px ${avatar.color}55`,
-                  borderColor: avatar.color,
-                }}
-                title={`${player.name} • Final rank #${rank}`}
-              >
-                <span
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-sm"
-                  style={{ backgroundColor: `${avatar.color}22` }}
-                >
-                  {avatar.emoji}
-                </span>
-              </div>
-            );
-          })}
+          </svg>
         </div>
-      )}
+      </div>
 
       <div className="flex flex-wrap gap-3 mt-4 text-xs">
-        {players.map((player, index) => (
-          <motion.div
-            key={`${player.username}-legend`}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 + index * 0.06 }}
-            className="inline-flex items-center gap-2 rounded-full border border-slate-700/60 bg-slate-900/80 px-2.5 py-1 text-slate-300"
-          >
-            <span
-              className="flex h-6 w-6 items-center justify-center rounded-full text-[11px]"
-              style={{ backgroundColor: `${getPlayerAvatar(player.username, avatarRegistry).color}22` }}
+        {players.map((player, index) => {
+          const color = getPlayerAvatar(player.username, avatarRegistry).color;
+          return (
+            <motion.div
+              key={`${player.username}-legend`}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 + index * 0.06 }}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-700/60 bg-slate-900/80 px-2.5 py-1 text-slate-300"
             >
-              {playerEmoji(player.username, avatarRegistry)}
-            </span>
-            <span className="max-w-[11rem] truncate">{player.name}</span>
-          </motion.div>
-        ))}
+              <span className="h-2.5 w-5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+              <span className="max-w-[11rem] truncate">{player.name}</span>
+            </motion.div>
+          );
+        })}
       </div>
     </div>
   );
@@ -631,15 +540,9 @@ function RankingAnalytics({ data }: { data: StandingsResponse | null }) {
                 aria-label={`Toggle ${player.name}`}
               />
               <span
-                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-lg transition-transform ${
-                  checked ? 'scale-105 bg-gradient-to-br from-indigo-400 to-fuchsia-400' : 'bg-slate-800'
-                }`}
-                style={{
-                  boxShadow: `0 0 0 1px ${avatar.color}55, 0 10px 24px ${avatar.color}22`,
-                }}
-              >
-                {avatar.emoji}
-              </span>
+                className="flex h-5 w-5 shrink-0 rounded-full"
+                style={{ backgroundColor: avatar.color }}
+              />
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium text-white">{player.name}</span>
                 <span className="block truncate text-xs text-slate-500">@{player.username}</span>
@@ -731,7 +634,6 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
 
   const avatarRegistry = buildAvatarRegistry(data.players.map((player) => player.username));
   const forecastPlayers = buildForecastPlayers(data.players, deltas);
-  const forecastByUsername = Object.fromEntries(forecastPlayers.map((player) => [player.username, player]));
   const projectedLeader = forecastPlayers[0];
   const biggestMover = [...forecastPlayers].sort((a, b) => {
     const rankMove = Math.abs(b.rankDelta) - Math.abs(a.rankDelta);
@@ -799,7 +701,7 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
         <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4">
           <p className="text-xs uppercase tracking-wide text-indigo-200/80">{APP_TEXT.simulator.leader}</p>
           <div className="mt-2 text-lg font-semibold text-white">
-            {projectedLeader ? `${playerEmoji(projectedLeader.username, avatarRegistry)} ${projectedLeader.display_name}` : '—'}
+            {projectedLeader ? projectedLeader.display_name : '—'}
           </div>
           <p className="text-sm text-indigo-100/80 mt-1">Rank #{projectedLeader?.projectedRank ?? '—'} · {projectedLeader ? projectedLeader.projectedTotal : '—'} pts</p>
         </div>
@@ -807,7 +709,7 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
         <div className="rounded-2xl border border-slate-700/50 bg-slate-900/45 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-400">{APP_TEXT.simulator.biggestMover}</p>
           <div className="mt-2 text-lg font-semibold text-white">
-            {biggestMover ? `${playerEmoji(biggestMover.username, avatarRegistry)} ${biggestMover.display_name}` : '—'}
+            {biggestMover ? biggestMover.display_name : '—'}
           </div>
           <p className="text-sm text-slate-300 mt-1">
             {biggestMover ? `${biggestMover.rankDelta > 0 ? '+' : ''}${biggestMover.rankDelta} rank change` : '—'}
@@ -869,9 +771,7 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
                 }`}
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-800 text-lg">
-                    {playerEmoji(player.username, avatarRegistry)}
-                  </div>
+                  <div className="h-4 w-4 shrink-0 rounded-full" style={{ backgroundColor: getPlayerAvatar(player.username, avatarRegistry).color }} />
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="flex-shrink-0">{rankBadge(player.projectedRank)}</span>
@@ -988,7 +888,7 @@ function WhatIfSimulator({ data }: { data: StandingsResponse | null }) {
             >
               <div className="flex justify-center">{rankBadge(player.projectedRank)}</div>
               <div className="min-w-0">
-                <div className="truncate font-medium text-white">{playerEmoji(player.username, avatarRegistry)} {player.display_name}</div>
+                <div className="truncate font-medium text-white">{player.display_name}</div>
                 <div className="truncate text-xs text-slate-500">@{player.username}</div>
               </div>
               <div className="text-center text-slate-300">
